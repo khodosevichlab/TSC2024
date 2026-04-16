@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSC2024</title>
+  <link rel="stylesheet" href="./assets/css/style.css">
+  <style>
+    body {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+      font-family: Arial, sans-serif;
+      line-height: 1.5;
+    }
+    h1, h2, h3 { margin-top: 1.5rem; }
+    .section { margin-top: 2rem; }
+    .file-list { margin: 0.5rem 0 0 1.25rem; }
+    .file-list li { margin: 0.35rem 0; }
+    .muted { color: #666; }
+    code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>TSC2024</h1>
+
+  <p>
+    Repository index for analysis notebooks and source files.
+    HTML notebooks can be opened directly below.
+  </p>
+
+  <div class="section">
+    <h2>Preprocessing</h2>
+    <ul class="file-list">
+      <li><a href="./analysis/1.preprocessing/preprocessing_no_cellbender.nb.html">Preprocessing without CellBender</a>
+        <span class="muted">| <a href="./analysis/1.preprocessing/preprocessing_no_cellbender.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/2.preprocessing_cb/preprocessing_with_cellbender.nb.html">Preprocessing with CellBender</a>
+        <span class="muted">| <a href="./analysis/2.preprocessing_cb/preprocessing_with_cellbender.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/2.preprocessing_cb/Extra_QC_plots.nb.html">Extra QC plots</a>
+        <span class="muted">| <a href="./analysis/2.preprocessing_cb/Extra_QC_plots.Rmd">Rmd</a></span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>All cells</h2>
+    <ul class="file-list">
+      <li><a href="./analysis/3.all_cells/Neurons_and_glia.nb.html">Neurons and glia</a>
+        <span class="muted">| <a href="./analysis/3.all_cells/Neurons_and_glia.Rmd">Rmd</a></span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Glia</h2>
+    <ul class="file-list">
+      <li><a href="./analysis/4.glia/Glia.nb.html">Glia analysis</a>
+        <span class="muted">| <a href="./analysis/4.glia/Glia.Rmd">Rmd</a></span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Neurons</h2>
+    <ul class="file-list">
+      <li><a href="./analysis/5.neurons/TSC2_Neurons.nb.html">TSC2 neurons</a>
+        <span class="muted">| <a href="./analysis/5.neurons/TSC2_Neurons.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/5.neurons/Cellchat/CellChat.nb.html">CellChat</a>
+        <span class="muted">| <a href="./analysis/5.neurons/Cellchat/CellChat.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/5.neurons/TF_inference/TF_analysis_neurons.nb.html">TF inference</a>
+        <span class="muted">| <a href="./analysis/5.neurons/TF_inference/TF_analysis_neurons.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/5.neurons/CLIP_cell_identification/CLIP_identification_neurons.nb.html">CLIP cell identification</a>
+        <span class="muted">| <a href="./analysis/5.neurons/CLIP_cell_identification/CLIP_identification_neurons.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/5.neurons/scgenotype/scGenotyping_all_cells.nb.html">scGenotyping</a>
+        <span class="muted">| <a href="./analysis/5.neurons/scgenotype/scGenotyping_all_cells.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/5.neurons/Tissue_origin_signatures/postmortem_surgery_signatures.nb.html">Postmortem vs surgery signatures</a>
+        <span class="muted">| <a href="./analysis/5.neurons/Tissue_origin_signatures/postmortem_surgery_signatures.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/5.neurons/GWAS_CELLEX_CELLECT/GWAS_cellect_cellex.nb.html">GWAS / CELLEX / CELLECT</a>
+        <span class="muted">| <a href="./analysis/5.neurons/GWAS_CELLEX_CELLECT/GWAS_cellect_cellex.Rmd">Rmd</a></span>
+      </li>
+    </ul>
+
+    <h3>Supporting neuron files</h3>
+    <ul class="file-list">
+      <li><a href="./analysis/5.neurons/Tissue_origin_signatures/gene_signatures_neurosurgery_postmortem.csv">Tissue origin signatures CSV</a></li>
+      <li><a href="./analysis/5.neurons/scgenotype/indices_sample_identifier.tsv">scGenotype sample identifiers TSV</a></li>
+      <li><a href="./analysis/5.neurons/GWAS_CELLEX_CELLECT/MAGMA_results/prioritization_focal.csv">MAGMA focal prioritization</a></li>
+      <li><a href="./analysis/5.neurons/GWAS_CELLEX_CELLECT/MAGMA_results/prioritization_generalized.csv">MAGMA generalized prioritization</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>smFISH</h2>
+    <ul class="file-list">
+      <li><a href="./analysis/6.smFISH/RNAcope_validation.nb.html">RNAscope validation</a>
+        <span class="muted">| <a href="./analysis/6.smFISH/RNAcope_validation.Rmd">Rmd</a></span>
+      </li>
+      <li><a href="./analysis/6.smFISH/RNAscope_data_for_R.csv">RNAscope data CSV</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Project files</h2>
+    <ul class="file-list">
+      <li><a href="./README.md">README</a></li>
+      <li><a href="./analysis/identifier_list.csv">Identifier list</a></li>
+    </ul>
+  </div>
+</body>
+</html>
