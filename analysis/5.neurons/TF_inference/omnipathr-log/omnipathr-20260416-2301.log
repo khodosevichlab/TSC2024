@@ -1,0 +1,49 @@
+[2026-04-16 23:03:50] [INFO]    [OmnipathR] Loading database `Ensembl and OMA organism names`.
+[2026-04-16 23:03:50] [INFO]    [OmnipathR] Looking up in cache `https://www.ensembl.org/info/about/species.html`: key=7332486db7400730697234bad76ca0c8e4d00799, latest version=1.
+[2026-04-16 23:03:50] [TRACE]   [OmnipathR] Cache file path: /home/vrx491/.cache/OmnipathR/7332486db7400730697234bad76ca0c8e4d00799-1.html
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Downloading by `generic_downloader`.
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Looking up in cache: `https://omabrowser.org/All/oma-species.txt`.
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Loaded data from RDS `/home/vrx491/.cache/OmnipathR/30e690cbb55dfc63b5903ab337f34ffc2f4be397-1.rds`.
+[2026-04-16 23:03:51] [INFO]    [OmnipathR] Loaded database `Ensembl and OMA organism names`.
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Processing args for OmniPath query
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Arguments for OmniPath query: [loops=TRUE,organisms=9606,genesymbols=TRUE,query_type=interactions,datasets=collectri]
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Organism(s): 9606
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Orthology targets: 
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Looking up in cache: `https://omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:51] [INFO]    [OmnipathR] Cache record does not exist: `https://omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Looking up in cache: `http://no-tls.omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:51] [INFO]    [OmnipathR] Cache record does not exist: `http://no-tls.omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Attempting `https://omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:51] [INFO]    [OmnipathR] Retrieving URL: `https://omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Attempt 1/3: `https://omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] HTTP request by `omnipath_curl`.
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Curl options: [connecttimeout=10,timeout=300,debugfunction=<function>,verbose=FALSE,tcp_keepalive=TRUE,tcp_keepintvl=10,tcp_keepidle=10,tcp_keepcnt=13,upkeep_interval_ms=30000,ssl_verifypeer=1,ssl_verifyhost=2]
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] HTTP v1 GET: status 200.
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] Downloaded 15.7 Kb in 0.160835s from omnipathdb.org (97.6 Kb/s); Redirect: 0s, DNS look up: 0.0717s, Connection: 0.093124s, Pretransfer: 0.118426s, First byte at: 0.159815s
+[2026-04-16 23:03:51] [TRACE]   [OmnipathR] HTTP headers: HTTP/1.1 200 OK; Server: nginx; Date: Thu, 16 Apr 2026 21:03:51 GMT; Content-Type: text/plain; charset=utf-8; Transfer-Encoding: chunked; Connection: keep-alive; Expires: Thu, 16 Apr 2026 22:03:51 GMT; Cache-Control: max-age=3600; X-Frame-Options: DENY; X-Cache-Status: HIT; Content-Encoding: gzip
+[2026-04-16 23:03:55] [INFO]    [OmnipathR] Successfully retrieved: `https://omnipathdb.org/interactions?genesymbols=yes&datasets=collectri&organisms=9606&fields=sources,references,curation_effort&loops=yes&license=academic`
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] Reading JSON from `/home/vrx491/.cache/OmnipathR/cache.json` (encoding: UTF-8).
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] JSON validation successful: TRUE
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] Reading JSON from `/home/vrx491/.cache/OmnipathR/cache.json` (encoding: UTF-8).
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] JSON validation successful: TRUE
+[2026-04-16 23:03:55] [INFO]    [OmnipathR] Cache item `b10176737ba43d460b13709623189f3911123779` version 1: status changed from `unknown` to `started`.
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] Exporting object to RDS: `/home/vrx491/.cache/OmnipathR/b10176737ba43d460b13709623189f3911123779-1.rds`.
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] Exported RDS to `/home/vrx491/.cache/OmnipathR/b10176737ba43d460b13709623189f3911123779-1.rds`.
+[2026-04-16 23:03:55] [INFO]    [OmnipathR] Download ready [key=b10176737ba43d460b13709623189f3911123779, version=1]
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] Reading JSON from `/home/vrx491/.cache/OmnipathR/cache.json` (encoding: UTF-8).
+[2026-04-16 23:03:55] [TRACE]   [OmnipathR] JSON validation successful: TRUE
+[2026-04-16 23:03:55] [INFO]    [OmnipathR] Cache item `b10176737ba43d460b13709623189f3911123779` version 1: status changed from `started` to `ready`.
+[2026-04-16 23:03:57] [SUCCESS] [OmnipathR] Downloaded 64979 interactions.
+[2026-04-16 23:03:57] [TRACE]   [OmnipathR] Processing args for OmniPath query
+[2026-04-16 23:03:57] [TRACE]   [OmnipathR] Arguments for OmniPath query: [genesymbols=TRUE,resources=CollecTRI,strict_evidences=TRUE,query_type=interactions,datasets=tf_mirna]
+[2026-04-16 23:03:57] [TRACE]   [OmnipathR] Organism(s): 9606
+[2026-04-16 23:03:57] [TRACE]   [OmnipathR] Orthology targets: 
+[2026-04-16 23:03:57] [TRACE]   [OmnipathR] Reading JSON from `https://omnipathdb.org/resources` (encoding: UTF-8).
+[2026-04-16 23:03:57] [TRACE]   [OmnipathR] JSON validation successful: TRUE
+[2026-04-16 23:03:57] [TRACE]   [OmnipathR] Looking up in cache: `https://omnipathdb.org/interactions?genesymbols=yes&resources=CollecTRI&datasets=tf_mirna&organisms=9606&fields=evidences,sources,references,curation_effort&license=academic`
+[2026-04-16 23:03:58] [TRACE]   [OmnipathR] Loaded data from RDS `/home/vrx491/.cache/OmnipathR/f7d34500401ba98803b7d2b26c48f64cee1eea1b-1.rds`.
+[2026-04-16 23:03:58] [INFO]    [OmnipathR] Loaded from cache: `https://omnipathdb.org/interactions?genesymbols=yes&resources=CollecTRI&datasets=tf_mirna&organisms=9606&fields=evidences,sources,references,curation_effort&license=academic`
+[2026-04-16 23:03:58] [TRACE]   [OmnipathR] Converting JSON column `evidences` to list.
+[2026-04-16 23:03:58] [TRACE]   [OmnipathR] Restricting interaction records to datasets: tf_mirna; and resources: CollecTRI
+[2026-04-16 23:03:58] [TRACE]   [OmnipathR] Filtering evidence columns: positive, negative, directed, undirected; to datasets: tf_mirna; and resources: CollecTRI; excluding resources: none
+[2026-04-16 23:03:58] [SUCCESS] [OmnipathR] Loaded 232 interactions from cache.

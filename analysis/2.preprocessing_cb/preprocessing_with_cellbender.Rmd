@@ -1,0 +1,1142 @@
+---
+title: "snRNA-seq TSC2 preprocessing with Cellbender"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+### Setup libraries
+```{r, setup}
+library(dplyr)
+library(magrittr)
+library(conos)
+library(pagoda2)
+library(cacoa)
+library(reticulate)
+library(ggplot2)
+library(ggrastr)
+library(cowplot)
+library(HDF5Array)
+library(Seurat)
+library(CRMetrics)
+library(ggrastr)
+set.seed(1)
+```
+
+```{r message=FALSE, include=FALSE}
+# Check if 'data' folder exists, if not, create it
+if (!dir.exists("data")) {
+  dir.create("data")
+  cat("Created 'data' folder\n")
+} else {
+  cat("'data' folder already exists\n")
+}
+
+# Check if 'figure' folder exists, if not, create it
+if (!dir.exists("figures")) {
+  dir.create("figures")
+  cat("Created 'figures' folder\n")
+} else {
+  cat("'figures' folder already exists\n")
+}
+
+```
+
+# CRMetrics
+## Make object and load count matrices
+### Replace data path with the location you store the count matrices. 
+```{r}
+data_path= "../../../Sequencing/counts"
+crm <- CRMetrics$new(data.path = data_path, n.cores = 100)
+```
+
+```{r}
+crm$selectMetrics()
+```
+```{r}
+mean_reads <- crm$plotSummaryMetrics(comp.group = "sample", metrics = "mean reads per cell", plot.geom = "bar")
+mean_reads$data
+mean(mean_reads$data$value)
+total_cells <- crm$plotSummaryMetrics(comp.group = "sample", metrics = "estimated number of cells", plot.geom = "bar")
+total_cells$data
+sum(total_cells$data$value)
+```
+```{r fig.height=12, fig.width=12}
+metrics.to.plot <- crm$selectMetrics(ids = c(1:4,6,18,19,11,15))
+p <- crm$plotSummaryMetrics(metrics = metrics.to.plot, 
+                       plot.geom = "bar")+theme_minimal()
+p
+ggsave(plot = p, filename = "figures/all_cells/cellranger_metrics_precb.pdf",dpi = 300, width = 12,height = 12,units = "in")
+```
+```{r}
+crm$selectMetrics()
+```
+
+```{r fig.height=9, fig.width=9}
+crm$addComparison("sample")
+```
+
+
+## Here cellbender scripts will be generated for use in terminal to run the pipeline
+### Pipeline is run in conda environment in terminal.
+```{r fig.height=15, fig.width=20}
+#crm$prepareCellbender(n.cores = 100)
+```
+```{r}
+#crm$saveCellbenderScript()
+```
+
+## Before proceeding to this step below, Cellbender unsupervised ambient RNA removal needs to be performed.
+
+```{r}
+crm$cms <- NULL
+crm$detailed.metrics <- NULL
+crm$cms.preprocessed <- NULL
+crm$con <- NULL
+# Set data path to your cellbender counts output folder (if you run it yourself, if not use the data file provided)
+crm$addCms(cellbender = T,data.path = "../../TSC2024_data_files/0.cellbender_counts/")
+crm$addDetailedMetrics(n.cores = 100)
+```
+
+
+```{r}
+mean_reads <- crm$plotSummaryMetrics(comp.group = "sample", metrics = "mean reads per cell", plot.geom = "bar")
+mean_reads$data
+mean(mean_reads$data$value)
+mean_reads
+total_cells <- crm$plotSummaryMetrics(comp.group = "sample", metrics = "estimated number of cells", plot.geom = "bar")
+total_cells$data
+sum(total_cells$data$value)
+total_cells
+```
+
+```{r fig.height=4, fig.width=8}
+metrics.to.plot <- crm$detailed.metrics$metric %>%
+  unique()
+
+umi <- crm$plotDetailedMetrics(metrics = metrics.to.plot[1], 
+                        plot.geom = "violin")
+gene_count <- crm$plotDetailedMetrics(metrics = metrics.to.plot[2], 
+                        plot.geom = "violin")
+median(umi$data$value)
+median(gene_count$data$value)
+```
+
+
+```{r fig.height=12, fig.width=12}
+library(ggplot2)
+library(ggforce)
+p <- crm$plotCbCells(data.path ="../../TSC2024_data_files/0.cellbender_counts/") +
+  theme(axis.text.x = element_text(angle = 45,   hjust = 1, vjust = 1),
+                       strip.background = element_blank(), # Remove the grey header box
+                       strip.text = element_text(face = "plain"))
+p
+ggsave(plot = p, filename = "figures/all_cells/cellbender_metrics.pdf",dpi = 300, width = 12,height = 12,units = "in")
+```
+
+
+```{r fig.height=10, fig.width=10}
+p <- crm$plotCbCellProbs(data.path ="../../TSC2024_data_files/0.cellbender_counts/") %>% rasterize(dpi=600) +
+  theme(axis.text.x = element_text(angle = 45,   hjust = 1, vjust = 1),
+                       strip.background = element_blank(), # Remove the grey header box
+                       strip.text = element_text(face = "plain"))
+
+p
+ggsave(plot = p, filename = "figures/all_cells/cellbender_cell_probabilities.pdf",dpi = 300, width = 12,height = 12,units = "in")
+```
+
+
+```{r fig.height=8, fig.width=12}
+p <- crm$plotCbAmbExp(data.path ="../../TSC2024_data_files/0.cellbender_counts/") %>% rasterize(dpi=600)+
+  theme(axis.text.x = element_text(angle = 45,   hjust = 1, vjust = 1),
+                       strip.background = element_blank(), # Remove the grey header box
+                       strip.text = element_text(face = "plain"))
+p
+ggsave(plot = p, filename = "figures/all_cells/cellbender_amb_expression.pdf",dpi = 300, width = 12,height = 12,units = "in")
+```
+
+```{r fig.height=6, fig.width=6}
+p <- crm$plotCbAmbGenes(data.path ="../../TSC2024_data_files/0.cellbender_counts/")+
+  theme(axis.text.x = element_text(angle = 45,   hjust = 1, vjust = 1),
+                       strip.background = element_blank(), # Remove the grey header box
+                       strip.text = element_text(face = "plain"))
+p
+ggsave(plot = p, filename = "figures/all_cells/cellbender_amb_genes.pdf",dpi = 300, width = 6,height = 6,units = "in")
+```
+
+```{r fig.height=16, fig.width=16, paged.print=TRUE}
+p <- crm$plotCbTraining(data.path ="../../TSC2024_data_files/0.cellbender_counts/")+
+  theme(axis.text.x = element_text(angle = 45,   hjust = 1, vjust = 1),
+                       strip.background = element_blank(), # Remove the grey header box
+                       strip.text = element_text(face = "plain"))
+p
+ggsave(plot = p, filename = "figures/all_cells/cellbender_training_curves.pdf",dpi = 300, width = 12,height = 12,units = "in")
+```
+
+## Proceed to normal filtering and preprocessing:
+```{r include=FALSE}
+crm$doPreprocessing(n.cores = 100)
+```
+```{r include=FALSE}
+crm$createEmbedding(n.cores = 100)
+```
+
+### General embedding
+```{r fig.height=8, fig.width=8}
+crm$con$plotGraph(size=0.1, shuffle.colors=T, alpha=0.3, font.size=3) %>% rasterise(dpi=600) +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/UMAP_all_cells_no_filtering.pdf"
+pdf.width = 10
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## Depth filtering 
+
+```{r}
+depth <- getConosDepth(crm$con)
+ggplot(data.frame(depth) %>% setNames(c("x")), aes(x)) + geom_histogram(binwidth = 0.005) + xlim(c(0,1e6)) + scale_x_log10() + geom_vline(xintercept = 1.7e3, color="red") + labs(title="Depth Profile") + xlab("Cell size (UMIs)") + ylab("Number of cells")
+filename = "figures/all_cells/depth_profile_all_cells_pre_filter.pdf"
+pdf.width = 10
+pdf.height = 8
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+### Sample per cell 
+```{r fig.height=8, fig.width=10}
+dspc <- crm$con$getDatasetPerCell()
+```
+```{r fig.height=8, fig.width=10}
+crm$con$plotGraph(groups=dspc, show.legend=T, size=0.1, alpha=0.3,font.size=0) %>% rasterise(dpi=600)  +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/dspc_all_cells_pre_filter.pdf"
+pdf.width = 11.5
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+## Doublet detection 
+```{r eval=FALSE, include=FALSE}
+library(reticulate)
+conda_create("r-reticulate", 
+             conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+             python_version = 3.8)
+conda_install("r-reticulate", 
+              conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+              pip = TRUE, 
+              packages = c("scrublet","doubletdetection"))
+```
+### Scrublet
+```{r}
+crm$detectDoublets(conda.path = "/opt/software/miniconda/4.12.0/condabin/conda",method = "scrublet",env = "r-reticulate", verbose = T)
+#Detected 3444 possible doublets out of 122731 cells.
+```
+
+```{r fig.height=8, fig.width=8}
+crm$plotEmbedding(doublet.method = "scrublet") %>% rasterise(dpi=600) +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/scrublet_labels_all_cells.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+```{r fig.height=8, fig.width=8}
+crm$plotEmbedding(doublet.method = "scrublet", 
+             doublet.scores = TRUE) %>% rasterise(dpi=600)  +
+    theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/scrublet_scores_all_cells.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+### DoubletDetection (not run for this dataset)
+```{r eval=FALSE, include=FALSE}
+crm$detectDoublets(conda.path = "/opt/software/miniconda/4.12.0/condabin/conda",env = "r-reticulate",method = "DoubletDetection", verbose = T)
+```
+```{r eval=FALSE, include=FALSE}
+crm$plotEmbedding(doublet.method = "doubletdetection") +
+    theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/doubletdetection_labels_all_cells.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+
+## Mitochondrial gene fraction 
+```{r fig.height=8, fig.width=8}
+crm$plotEmbedding(mito.frac = TRUE, 
+             mito.cutoff = 0.05, 
+             species = "human") %>% rasterise(dpi=600) +
+    theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/mitofraction_labels_all_cells.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r fig.height=6, fig.width=10}
+group.per.cell <- dspc %>% as.character()
+mito_frac <- mitoFraction(crm$con, "human")
+ggplot(data.frame(Mito=mito_frac, Group=group.per.cell), aes(Group, Mito)) + ggbeeswarm::geom_quasirandom(size=0.1) %>% rasterise(dpi=600) +
+  geom_hline(yintercept = 0.05, col="red")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ylab("Mitochondrial gene fraction") +
+  xlab("Sample") +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/mitofraction_sample_scatter_all_cells.pdf"
+pdf.width = 10
+pdf.height = 8
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+## Scrublet filter plots
+```{r fig.height=8, fig.width=10}
+crm$plotFilteredCells(type="embedding",
+                      doublet.method = "scrublet", 
+                      depth = T,
+                      depth.cutoff = 100,
+                      mito.frac = TRUE, 
+                      mito.cutoff = 0.05, 
+                      species = "human",
+                      cols = c("aliceblue","deeppink3","darkblue","orange","tan2","darkcyan","black","chartreuse1"),
+                      size = 0.4) %>% rasterise(dpi=600)  +
+    theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/all_cells/cellstofilter_all_cells_prefilter_embedding.pdf"
+pdf.width = 11.5
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r fig.height=8, fig.width=10}
+crm$plotFilteredCells(type = "bar", 
+                      doublet.method = "scrublet", 
+                      depth = FALSE,
+                      depth.cutoff = 0,
+                      mito.frac = TRUE, 
+                      mito.cutoff = 0.05, 
+                      species = "human") +
+    theme(panel.border = element_blank())
+filename = "figures/all_cells/cellstofilter_all_cells_prefilter_barplot.pdf"
+pdf.width = 11.5
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+saveRDS(crm, "data/crm_ready_filtering_manuscript.rds", compress=F)
+```
+## First filtering
+### Here only doublets and cells with 5% > mitochondrial gene fraction are filtered. 
+
+```{r}
+crm$filterCms(mito.cutoff =0.05,
+              species ="human",
+              doublets="scrublet")
+```
+
+```{r}
+saveRDS(crm$cms.filtered, "data/cms_doublet_mito_filtered_all_cells.rds", compress=F)
+```
+
+## Make Conos object
+```{r eval=FALSE, include=FALSE}
+con<- quickConos(crm$cms.filtered,
+                  names(crm$cms.filtered), 
+                  make.geneknn = F,
+                  get.largevis = F,
+                  n.odgenes = 3e3,
+                  nPcs = 100,
+                  min.cells.per.gene = 3, 
+                  min.transcripts.per.cell = 200, 
+                  ncomps = 40,
+                  get.tsne = F,
+                  n.cores.p2=100,
+                  n.cores.con=100)
+con <- con$con
+
+saveRDS(object = con, file = "data/con_doublets_mito_filterd_all_cells_manuscript.rds", compress = F)
+```
+```{r eval=FALSE, include=FALSE}
+saveRDS(crm, "data/crm_doublet_mito_filtered_all_cells_manuscript.rds", compress=F)
+```
+
+```{r}
+crm <- readRDS("data/crm_doublet_mito_filtered_all_cells_manuscript.rds")
+con <- readRDS("data/con_doublets_mito_filterd_all_cells_manuscript.rds")
+anno <- readRDS("anno_for_filtering.rds")
+```
+
+
+```{r fig.height=8, fig.width=8}
+con$plotGraph(size=0.1,
+              alpha=0.1,
+              groups = anno,
+              font.size=6,
+              shuffle.colors=T) %>% rasterise(dpi=600)  +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())
+
+
+filename = "figures/all_cells/UMAP_mito_doublet_filter_anno.pdf"
+pdf.width = 10
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+```{r fig.height=12, fig.width=12}
+c("RBFOX3","SLC17A7","GAD1","AQP4","VCAN","MOG","CSF1R","PTPRC","CLDN5") %>%
+lapply(function(g) con$plotGraph(gene=g,
+                                 title=g,
+                                 size=0.2,
+                                 alpha=1) %>% rasterise(dpi=600) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())) %>%
+  cowplot::plot_grid(plotlist=.,ncol=3)  
+
+filename = "figures/all_cells/UMAP_marker_genes.pdf"
+pdf.width = 15
+pdf.height = 15
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+
+# Split neurons and glia for further preprocessing
+
+## Neuron subset
+```{r}
+cms_neurons <- crm$cms.filtered
+cms_neurons %<>% lapply(function(x) x[,colnames(x) %in% names(anno[anno %in% c("neurons")])])
+```
+```{r}
+# Define the function to modify column names
+modify_colnames <- function(matrix) {
+  # Modify the column names by removing parts of the string using gsub
+  colnames(matrix) <- gsub("^.*!!", "", colnames(matrix))
+  return(matrix)
+}
+
+# Apply this function to each matrix in the list using sapply
+cms_neurons_clean <- sapply(cms_neurons,
+                            modify_colnames,
+                            simplify = FALSE)
+```
+
+## Glia subset
+```{r}
+cms_glia <- crm$cms.filtered
+cms_glia %<>% lapply(function(x) x[,colnames(x) %in% names(anno[anno %in% c("glia")])])
+```
+
+```{r}
+# Define the function to modify column names
+modify_colnames <- function(matrix) {
+  # Modify the column names by removing parts of the string using gsub
+  colnames(matrix) <- gsub("^.*!!", "", colnames(matrix))
+  return(matrix)
+}
+
+# Apply this function to each matrix in the list using sapply
+cms_glia_clean <- sapply(cms_glia,
+                         modify_colnames,
+                         simplify = FALSE)
+```
+
+# Glia
+
+
+```{r}
+crm_glia<- CRMetrics$new(cms = cms_glia_clean,
+                         n.cores = 100) #Remember to =F unique names as it will introduce problems down the line with plots if cell names are made unique twice. 
+```
+
+```{r}
+crm_glia$addDetailedMetrics(n.cores = 100)
+```
+```{r}
+dir.create("figures/glia")
+```
+
+```{r fig.height=4, fig.width=8}
+metrics.to.plot <- crm_glia$detailed.metrics$metric %>%
+  unique()
+
+crm_glia$plotDetailedMetrics(metrics = metrics.to.plot, 
+                        plot.geom = "violin")+
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())
+
+filename = "figures/glia/violin_plot_metrics.pdf"
+pdf.width = 10
+pdf.height = 5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r}
+crm_glia$doPreprocessing(n.cores = 100)
+```
+```{r}
+crm_glia$createEmbedding(n.cores = 100)
+```
+
+```{r}
+saveRDS(crm_glia, "data/crm_glia_cb_prefilter_manuscript.rds", compress=F)
+
+```
+
+      #General embedding
+```{r fig.height=8, fig.width=8}
+crm_glia$con$plotGraph(size=0.1,
+                       shuffle.colors=T,
+                       alpha=0.5) %>% rasterise(dpi=600) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())
+
+filename = "figures/glia/UMAP_glia.pdf"
+pdf.width = 10
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+```{r}
+c("AQP4","VCAN","MOG","CSF1R","PTPRC","CLDN5") %>%
+lapply(function(g) crm_glia$con$plotGraph(gene=g,
+                                          title=g,
+                                          size=0.2,
+                                          alpha=1) %>% rasterise(dpi=300) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())) %>%
+  cowplot::plot_grid(plotlist=.,ncol=3)
+
+filename = "figures/glia/UMAP_glia_marker_genes.pdf"
+pdf.width = 10
+pdf.height = 6.66
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## Depth filtering 
+
+```{r}
+crm_glia$getDepth()
+crm_glia$plotEmbedding(depth = TRUE, 
+             depth.cutoff = 1e3)
+```
+
+
+```{r}
+depth <- getConosDepth(crm_glia$con)
+
+ggplot(data.frame(depth) %>% setNames(c("x")), aes(x)) + 
+  geom_histogram(binwidth = 0.005) +
+  xlim(c(0,1e6)) +
+  scale_x_log10() +
+  geom_vline(xintercept = 0.6e3, color="red") +
+  labs(title="Depth Profile") +
+  xlab("Cell size (UMIs)") +
+  ylab("Number of cells")
+
+filename = "figures/glia/depth_profile_glia_pre_filter.pdf"
+pdf.width = 10
+pdf.height = 8
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+depth <- getConosDepth(crm_glia$con)
+sum(depth<600)
+```
+```{r}
+crm_glia$cms %>% sapply(ncol) %>% sum()
+```
+
+## Sample per cell 
+```{r fig.height=8, fig.width=10}
+dspc <- crm_glia$con$getDatasetPerCell()
+```
+```{r fig.height=8, fig.width=10}
+crm_glia$con$plotGraph(groups=dspc,
+                       show.legend=T,
+                       size=0.1,
+                       alpha=0.5,
+                       font.size=0) %>% rasterise(dpi=600) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank())
+
+filename = "figures/glia/dspc_glia_pre_filter.pdf"
+pdf.width = 11.5
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+## Doublet detection 
+```{r eval=FALSE, include=FALSE}
+library(reticulate)
+conda_create("r-reticulate", 
+             conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+             python_version = 3.8)
+conda_install("r-reticulate", 
+              conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+              pip = TRUE, 
+              packages = c("scrublet","doubletdetection"))
+```
+## Scrublet
+```{r}
+crm_glia$detectDoublets(conda.path = "/opt/software/miniconda/4.12.0/condabin/conda",method = "scrublet",env = "r-reticulate", verbose = T)
+#Detected 147 possible doublets out of 27208 cells.
+```
+
+```{r fig.height=8, fig.width=8}
+crm_glia$plotEmbedding(doublet.method = "scrublet")+
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank())
+
+filename = "figures/glia/scrublet_labels_glia.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+```{r fig.height=8, fig.width=8}
+crm_glia$plotEmbedding(doublet.method = "scrublet", 
+             doublet.scores = TRUE) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())
+
+filename = "figures/glia/scrublet_scores_glia.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## Mitochondrial gene fraction 
+
+```{r fig.height=8, fig.width=8}
+crm_glia$plotEmbedding(mito.frac = TRUE, 
+             mito.cutoff = 0.05, 
+             species = "human") +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())
+
+filename = "figures/glia/mitofraction_labels_glia.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r fig.height=6, fig.width=10}
+group.per.cell <- dspc %>% as.character()
+mito_frac <- mitoFraction(crm_glia$con, "human")
+
+ggplot(data.frame(Mito=mito_frac, Group=group.per.cell), aes(Group, Mito)) +
+  ggbeeswarm::geom_quasirandom(size=0.1) +
+  geom_hline(yintercept = 0.05, col="red") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ylab("Mitochondrial gene fraction") +
+  xlab("Sample") +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank())
+
+filename = "figures/glia/mitofraction_sample_scatter_glia.pdf"
+pdf.width = 10
+pdf.height = 8
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## Filter plots
+```{r fig.height=8, fig.width=10}
+crm <- crm_glia
+
+crm$plotFilteredCells(type="embedding",
+                      doublet.method = "scrublet", 
+                      depth = T,
+                      depth.cutoff = 600,
+                      mito.frac = TRUE, 
+                      mito.cutoff = 0.05, 
+                      species = "human",
+                      cols = c("azure2",
+                               "deeppink3",
+                               "darkblue",
+                               "orange",
+                               "tan2",
+                               "darkcyan",
+                               "black",
+                               "chartreuse1")
+                      ,alpha=0.5) %>% rasterise(dpi=600) + 
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank())
+
+filename = "figures/glia/cellstofilter_glia_prefilter_embedding.pdf"
+pdf.width = 11.5
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+doublet_res <- crm_glia$doublets$scrublet$result
+mito_res <- crm_glia$getMitoFraction()
+crm_glia$cms %>% sapply(ncol) %>% sum
+```
+```{r}
+filterVector <- CRMetrics:::filterVector
+```
+
+```{r}
+library(ggrepel)
+
+depth.cutoff=600
+sep="!!"
+depths <- crm_glia$getDepth() %>% filterVector("depth.cutoff", 
+            depth.cutoff, depth.cutoff %>% names(), sep) %>% 
+            {
+                ifelse(!., "depth", "")
+            }
+    
+mito.cutoff=0.05
+species="human"
+mf <- crm_glia$getMitoFraction(species = species) %>% filterVector("mito.cutoff", 
+            mito.cutoff, mito.cutoff %>% names(), sep) %>% {
+            ifelse(., "mito", "")
+        }
+
+doublet.method <- "scrublet"
+tmp.doublets <- crm_glia$doublets[[doublet.method]]$result
+        doublets <- tmp.doublets$labels %>% ifelse("doublet", 
+            "") %>% setNames(rownames(tmp.doublets))
+
+cell.idx <- crm_glia$cms %>% lapply(colnames) %>% Reduce(c, .)
+tmp <- list(depth = depths, mito = mf, doublets = doublets) %>% 
+        .[!sapply(., is.null)] %>% lapply(function(filter) filter[cell.idx]) %>% 
+        bind_cols() %>% as.data.frame() %>% `rownames<-`(cell.idx)
+    
+tmp %<>% mutate(., filter = apply(., 1, paste, collapse = " ")) %>% 
+            mutate(filter = gsub("^\\s+|\\s+$", "", filter) %>% 
+                gsub("  ", " ", ., fixed = TRUE) %>% gsub(" ", 
+                "+", .))
+tmp$filter[tmp$filter == ""] <- "kept"
+tmp$filter %<>% factor()
+if ("kept" %in% levels(tmp$filter)) {
+  tmp$filter %<>% relevel(ref = "kept")
+  colstart <- 1
+}
+
+g <- tmp %>% mutate(., sample = rownames(.) %>% strsplit(sep) %>% 
+                      sapply("[[", 1), filter = ifelse(grepl("+", filter, 
+                                                             fixed = TRUE), "combination", as.character(filter))) %>% 
+  group_by(sample, filter) %>% dplyr::count() %>% ungroup() %>% 
+  group_by(sample) %>% mutate(pct = n/sum(n) * 100) %>% 
+  ungroup() %>% filter(filter != "kept") %>% ggplot(aes(sample, 
+                                                        pct, fill = filter)) + geom_bar(stat = "identity") + 
+  geom_text_repel(aes(label = sprintf("%0.2f", round(pct, 
+                                                     digits = 2))), position = position_stack(vjust = 0.5), 
+                  direction = "y", size = 2.5) + crm$theme + theme(axis.text.x = element_text(angle = 45, 
+                                                                                               hjust = 1)) + labs(x = "", y = "Percentage cells filtered")
+g + theme(panel.border = element_blank())
+filename = "figures/glia/cellstofilter_glia_prefilter_barplot.pdf"
+pdf.width = 11.5
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+```{r}
+crm_glia$filterCms(mito.cutoff =0.05,
+                   species ="human",
+                   doublets="scrublet",
+                   depth.cutoff = 600)
+```
+
+
+```{r}
+saveRDS(crm_glia, "data/crm_glia_filtered_manuscript.rds", compress=F)
+```
+
+# Neurons
+
+```{r}
+crm_neurons<- CRMetrics$new(cms = cms_neurons_clean, n.cores = 100)
+```
+
+```{r}
+crm_neurons$addDetailedMetrics(n.cores = 100)
+```
+
+```{r}
+dir.create("figures/neurons")
+```
+
+```{r fig.height=4, fig.width=8}
+metrics.to.plot <- crm_neurons$detailed.metrics$metric %>%
+  unique()
+crm_neurons$plotDetailedMetrics(metrics = metrics.to.plot, 
+                        plot.geom = "violin") +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/neurons/detailed_metrics_neurons.pdf"
+pdf.width = 10
+pdf.height = 5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+```{r}
+crm_neurons$doPreprocessing(n.cores = 100)
+```
+```{r}
+crm_neurons$createEmbedding(n.cores = 100)
+```
+
+```{r}
+saveRDS(crm_neurons, "data/crm_neurons_cb_manuscript.rds", compress=F)
+```
+
+
+```{r}
+crm_neurons$con$plotGraph(size=0.1,
+                          shuffle.colors=T,
+                          alpha=0.5) %>% rasterise(dpi=600) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())
+
+filename = "figures/neurons/UMAP_neurons.pdf"
+pdf.width = 10
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+
+## General embedding
+```{r fig.height=8, fig.width=8}
+depth <- crm_neurons$getDepth()
+crm_neurons$con$plotGraph(size=0.2, mark.groups=F, show.legend = T)
+
+
+```
+```{r fig.height=12, fig.width=9}
+c("RBFOX3","SLC17A7","CUX2","RORB","FEZF2","THEMIS","GAD1","ID2","VIP","SST","PVALB") %>%
+  lapply(function(g) crm_neurons$con$plotGraph(gene=g,
+                                               title=g,
+                                               size=0.03,
+                                               alpha=0.3) %>% rasterise(dpi=600) + 
+           theme(panel.grid.minor = element_blank(),
+                 panel.grid.major = element_blank(),
+                 panel.border = element_blank())) %>% 
+  rasterize(dpi=450) %>%
+  cowplot::plot_grid(plotlist=.,ncol=4)
+
+filename = "figures/neurons/neurons_marker_genes.pdf"
+pdf.width = 12
+pdf.height = 9
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+  
+```
+## Depth filtering 
+
+```{r}
+depth <- getConosDepth(crm_neurons$con)
+
+ggplot(data.frame(depth) %>% setNames(c("x")), aes(x)) +
+  geom_histogram(binwidth = 0.005) + 
+  xlim(c(0,1e6)) + scale_x_log10() + 
+  geom_vline(xintercept = 1.7e3, color="red") + 
+  labs(title="Depth Profile") + 
+  xlab("Cell size (UMIs)") +
+  ylab("Number of cells")
+
+filename = "figures/neurons/depth_profile_neurons_pre_filter.pdf"
+pdf.width = 10
+pdf.height = 8
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+depth <- getConosDepth(crm_neurons$con)
+sum(depth<1700)
+```
+```{r}
+crm_neurons$cms %>% sapply(ncol) %>% sum()
+```
+
+## Sample per cell 
+```{r fig.height=8, fig.width=10}
+dspc <- crm_neurons$con$getDatasetPerCell()
+```
+```{r fig.height=8, fig.width=10}
+crm_neurons$con$plotGraph(groups=dspc, show.legend=T, size=0.1, alpha=0.5,font.size=0) %>% rasterise(dpi=600) +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/neurons/dspc_neurons_pre_filter.pdf"
+pdf.width = 11.5
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+## Doublet detection (Not used)
+```{r eval=FALSE, include=FALSE}
+library(reticulate)
+conda_create("r-reticulate", 
+             conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+             python_version = 3.8)
+conda_install("r-reticulate", 
+              conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+              pip = TRUE, 
+              packages = c("scrublet","doubletdetection"))
+```
+## Scrublet
+```{r}
+crm_neurons$detectDoublets(conda.path = "/opt/software/miniconda/4.12.0/condabin/conda",method = "scrublet",env = "r-reticulate", verbose = T)
+#Detected 144 possible doublets out of 88407 cells.
+```
+
+```{r fig.height=8, fig.width=8}
+crm_neurons$plotEmbedding(doublet.method = "scrublet") %>% rasterise(dpi=600)+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/neurons/scrublet_labels_neurons.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+```{r fig.height=8, fig.width=8}
+crm_neurons$plotEmbedding(doublet.method = "scrublet", 
+             doublet.scores = TRUE) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank())
+
+filename = "figures/neurons/scrublet_scores_neurons.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## Mitochondrial gene fraction 
+
+```{r fig.height=8, fig.width=8}
+crm_neurons$plotEmbedding(mito.frac = TRUE, 
+             mito.cutoff = 0.05, 
+             species = "human") +
+    theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/neurons/mitofraction_labels_neurons.pdf"
+pdf.width = 10
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r fig.height=6, fig.width=10}
+group.per.cell <- dspc %>% as.character()
+mito_frac <- mitoFraction(crm_neurons$con, "human")
+ggplot(data.frame(Mito=mito_frac, Group=group.per.cell), aes(Group, Mito)) + ggbeeswarm::geom_quasirandom(size=0.1) +
+  geom_hline(yintercept = 0.05, col="red")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ylab("Mitochondrial gene fraction") +
+  xlab("Sample") +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/neurons/mitofraction_sample_scatter_neurons.pdf"
+pdf.width = 10
+pdf.height = 8
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## Filter plots
+```{r fig.height=8, fig.width=10}
+crm <- crm_neurons
+crm_neurons$plotFilteredCells(type="embedding",
+                      doublet.method = "scrublet", 
+                      depth = T,
+                      depth.cutoff = 1700,
+                      mito.frac = TRUE, 
+                      mito.cutoff = 0.05, 
+                      species = "human",
+                      cols = c("azure2","deeppink3","darkblue","orange","tan2","darkcyan","black","chartreuse1"),alpha=0.3)%>% rasterise(dpi=600) +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+filename = "figures/neurons/cellstofilter_neurons_prefilter_embedding.pdf"
+pdf.width = 11.5
+pdf.height = 10.2
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r fig.height=8, fig.width=10}
+crm <- crm_neurons
+crm_neurons$plotFilteredCells(type="bar",
+                      doublet.method = "scrublet", 
+                      depth = T,
+                      depth.cutoff = 1700,
+                      mito.frac = TRUE, 
+                      mito.cutoff = 0.05, 
+                      species = "human") + theme(panel.border = element_blank())
+filename = "figures/neurons/cellstofilter_neurons_prefilter_bar.pdf"
+pdf.width = 11.5
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r}
+library(ggrepel)
+depth.cutoff=600
+sep="!!"
+depths <- crm_neurons$getDepth() %>% filterVector("depth.cutoff", 
+            depth.cutoff, depth.cutoff %>% names(), sep) %>% 
+            {
+                ifelse(!., "depth", "")
+            }
+    
+mito.cutoff=0.05
+species="human"
+mf <- crm_neurons$getMitoFraction(species = species) %>% filterVector("mito.cutoff", 
+            mito.cutoff, mito.cutoff %>% names(), sep) %>% {
+            ifelse(., "mito", "")
+        }
+
+doublet.method <- "scrublet"
+tmp.doublets <- crm_neurons$doublets[[doublet.method]]$result
+        doublets <- tmp.doublets$labels %>% ifelse("doublet", 
+            "") %>% setNames(rownames(tmp.doublets))
+
+cell.idx <- crm_neurons$cms %>% lapply(colnames) %>% Reduce(c, .)
+tmp <- list(depth = depths, mito = mf, doublets = doublets) %>% 
+        .[!sapply(., is.null)] %>% lapply(function(filter) filter[cell.idx]) %>% 
+        bind_cols() %>% as.data.frame() %>% `rownames<-`(cell.idx)
+    
+tmp %<>% mutate(., filter = apply(., 1, paste, collapse = " ")) %>% 
+            mutate(filter = gsub("^\\s+|\\s+$", "", filter) %>% 
+                gsub("  ", " ", ., fixed = TRUE) %>% gsub(" ", 
+                "+", .))
+tmp$filter[tmp$filter == ""] <- "kept"
+tmp$filter %<>% factor()
+if ("kept" %in% levels(tmp$filter)) {
+  tmp$filter %<>% relevel(ref = "kept")
+  colstart <- 1
+}
+
+g <- tmp %>% mutate(., sample = rownames(.) %>% strsplit(sep) %>% 
+                      sapply("[[", 1), filter = ifelse(grepl("+", filter, 
+                                                             fixed = TRUE), "combination", as.character(filter))) %>% 
+  group_by(sample, filter) %>% dplyr::count() %>% ungroup() %>% 
+  group_by(sample) %>% mutate(pct = n/sum(n) * 100) %>% 
+  ungroup() %>% filter(filter != "kept") %>% ggplot(aes(sample, 
+                                                        pct, fill = filter)) + geom_bar(stat = "identity") + 
+  geom_text_repel(aes(label = sprintf("%0.2f", round(pct, 
+                                                     digits = 2))), position = position_stack(vjust = 0.5), 
+                  direction = "y", size = 2.5) + crm$theme + theme(axis.text.x = element_text(angle = 45, 
+                                                                                               hjust = 1)) + labs(x = "", y = "Percentage cells filtered")
+g + theme(panel.border = element_blank())
+filename = "figures/neurons/cellstofilter_neurons_prefilter_barplot.pdf"
+pdf.width = 11.5
+pdf.height = 10
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r}
+crm_neurons$filterCms(depth.cutoff = 1700,mito.cutoff = 0.05,doublets = "scrublet",species = "human")
+```
+
+
+```{r}
+saveRDS(crm_neurons, "data/crm_neurons_filtered_manuscript.rds", compress=F)
+```
+
+
+# New Conos Objects
+```{r}
+cms_glia_filter <- crm_glia$cms.filtered
+cms_neurons_filter <- crm_neurons$cms.filtered
+```
+
+
+```{r}
+con_glia<- quickConos(crm_glia$cms.filtered,
+                  names(crm_glia$cms.filtered), 
+                  make.geneknn = F,
+                  get.largevis = F,
+                  n.odgenes = 3e3,
+                  nPcs = 100,
+                  min.cells.per.gene = 3, 
+                  min.transcripts.per.cell = 200, 
+                  ncomps = 40,
+                  get.tsne = T,
+                  n.cores.p2=100,
+                  n.cores.con=100)
+con_glia <- con_glia$con
+
+saveRDS(object = con_glia, file = "data/con_glia_filtered_manuscript.rds", compress = F)
+```
+
+```{r}
+con_neurons<- quickConos(crm_neurons$cms.filtered,
+                  names(crm_neurons$cms.filtered), 
+                  make.geneknn = F,
+                  get.largevis = F,
+                  n.odgenes = 3e3,
+                  nPcs = 100,
+                  min.cells.per.gene = 3, 
+                  min.transcripts.per.cell = 200, 
+                  ncomps = 40,
+                  get.tsne = T,
+                  n.cores.p2=100,
+                  n.cores.con=100)
+con_neurons <- con_neurons$con
+
+saveRDS(object = con_neurons, file = "data/con_neurons_filtered_manuscript.rds", compress = F)
+```
+```{r fig.width=8, fig.height=8}
+con_neurons$plotGraph(size=0.1, alpha=.5, groups=annotation$l4, font.size=3)
+```
+
+
+#New CMS for filtered cells
+```{r}
+cms_filtered_n<- cms_neurons_filter
+cms_filtered_n%<>% lapply(function(x) x[,colnames(x) %in% names(annotation$l1[annotation$l1 %in% c("Inhibitory neurons","Excitatory neurons")])])
+```
+```{r}
+annotation_g <- readRDS("../../cacoa/Full_dataset/cacioa_all_2.0/annotation_all.rds")
+annotation_g <- annotation_g$l1[annotation_g$l1 %in% c("Microglia","Astrocytes","OPCs","Oligodendrocytes","diff","Immune cells", "Endothelial cells", "Pericytes")] %>% droplevels()
+cms_filtered_g <- cms_glia_filter
+cms_filtered_g %<>% lapply(function(x) x[,colnames(x) %in% names(annotation_g[annotation_g %in% c("Astrocytes","diff","Endothelial cells","Immune cells","Microglia","Oligodendrocytes","OPCs","Pericytes")])])
+```
+
+#Make annotations and append them
+```{r}
+annotation_cms <- c(as.character(annotation_g), as.character(annotation$l1)) %>% setNames(c(names(annotation_g), names(annotation$l1))) %>% factor() %>% droplevels()
+```
+
+```{r}
+cms_combined <- mapply(function(x, y) sccore::mergeCountMatrices(c(x, y)), x = crm_neurons$cms.filtered, y=crm_glia$cms.filtered)
+cms_combined %>% sapply(ncol) %>% sum()
+```
+
+```{r}
+con_filtered<- quickConos(cms_combined,
+                  names(cms_combined), 
+                  make.geneknn = F,
+                  get.largevis = F,
+                  n.odgenes = 3e3,
+                  nPcs = 100,
+                  min.cells.per.gene = 3, 
+                  min.transcripts.per.cell = 200, 
+                  ncomps = 40,
+                  get.tsne = F,
+                  n.cores.p2=100,
+                  n.cores.con=100,)
+
+con_filtered <- con_filtered$con
+
+saveRDS(object = con_filtered, file = "data/con_filtered_manuscript.rds", compress = F)
+```
+
+```{r}
+cms_combined_clean <- sapply(cms_combined,
+                            modify_colnames,
+                            simplify = FALSE)
+```
+
+```{r}
+sessionInfo()
+```
+

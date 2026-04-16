@@ -1,0 +1,172 @@
+---
+title: "snRNA-seq TSC2 extra QC_plots"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+#Make violinplot of UMI and genes per cell per cell type
+
+
+```{r}
+plot_data <- readRDS("../../TSC2024_data_files/2.preprocessing_cb/QC_plot_data_from_seurat.rds")
+```
+
+```{r fig.height=5, fig.width=14}
+# Specify the desired order of cell types
+desired_order <- c(
+  "Astrocytes", "diff", "Endothelial cells", "Immune cells", "Microglia", 
+  "Oligodendrocytes", "OPCs", "Pericytes",
+  "L2_CUX2_LAMP5_PDGFD","L2_3_CUX2_FREM3_NTNG1", "L3_CUX2_SPOCK3_PRSS12", 
+  "L4_RORB_SCHLAP1_ARHGAP15", "L4_RORB_SCHLAP1_MET", "L4_RORB_SCHLAP1_MME", 
+  "L5_6_FEZF2_LRRK1_PCP4", "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", 
+  "L5_6_FEZF2_TLE4_HTR2C", "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", 
+  "L5_6_THEMIS_SEMA3A",
+  "ID2_CHRNA7_CNR1", "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6", "ID2_LAMP5_CRH", 
+  "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1",
+  "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH", "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", 
+  "VIP_TYR",
+  "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B",
+  "SST_CALB1", "SST_ISOC_THSD7B", "SST_NOS1", "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH",
+  "TBD", "Neu_dev_THY1"
+)
+
+# Reorder the factor levels
+plot_data$annol4 <- factor(plot_data$annol4, levels = desired_order)
+```
+
+```{r}
+library(ggrastr)
+```
+
+
+```{r fig.height=5, fig.width=14}
+#UMIs
+p <- ggplot(plot_data, aes(x=annol4, y=nCount_RNA, fill=annol4)) + 
+  geom_violin(trim=T, scale="width") +  # Broader violin plots
+  geom_boxplot(width=0.3, outlier.shape=NA) +  # Add boxplot with median and quartiles
+  geom_jitter(width=0.4, size=0.1, alpha=0.01) +  # Add data points with low opacity
+  labs(y="UMIs per Cell", x=element_blank(), title="UMIs per Cell Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none",plot.title = element_text(hjust = 0.5)) +  # Rotate x-axis text
+  scale_y_continuous(breaks = seq(0, 60000, by = 10000), limits=c(0,60000))
+p <- p %>% rasterize(dpi=600)
+ggsave(plot = p, filename = "figures/all_cells/UMIs_per_cell.pdf",dpi = 600, width = 14,height =5 ,units = "in")
+```
+
+
+```{r fig.height=5, fig.width=14}
+#Genes
+p <- ggplot(plot_data, aes(x=annol4, y=nFeature_RNA, fill=annol4)) + 
+  geom_violin(trim=T, scale="width") +  # Broader violin plots
+  geom_boxplot(width=0.3, outlier.shape=NA) +  # Add boxplot with median and quartiles
+  geom_jitter(width=0.2, size=0.1, alpha=0.01) +  # Add data points with low opacity
+  labs(y="Genes per Cell", x=element_blank(), title="Genes per Cell Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none",plot.title = element_text(hjust = 0.5)) +  # Rotate x-axis text
+  scale_y_continuous(breaks = seq(0, 10000, by = 1500),limits = c(0,10000))
+p <- p %>% rasterize(dpi=600)
+ggsave(plot = p, filename = "figures/all_cells/genes_per_cell.pdf",dpi = 600, width = 14,height =5 ,units = "in")
+```
+#Individual violin plots for neurons and glia
+###UMI
+```{r fig.height=5, fig.width=14}
+# Define glia and neuron cell types
+glia_types <- c("Astrocytes", "Microglia", "Oligodendrocytes", "OPCs", "Pericytes", "Endothelial cells","Immune cells")
+neuron_types <- c("ID2_CHRNA7_CNR1", "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6", "ID2_LAMP5_CRH", 
+                  "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", "L2_3_CUX2_FREM3_NTNG1", 
+                  "L2_CUX2_LAMP5_PDGFD", "L3_CUX2_SPOCK3_PRSS12", "L4_RORB_SCHLAP1_ARHGAP15", 
+                  "L4_RORB_SCHLAP1_MET", "L4_RORB_SCHLAP1_MME", "L5_6_FEZF2_LRRK1_PCP4", 
+                  "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", "L5_6_FEZF2_TLE4_HTR2C", 
+                  "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", "L5_6_THEMIS_SEMA3A", 
+                  "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH", "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", 
+                  "VIP_TYR", "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B", "SST_CALB1", 
+                  "SST_ISOC_THSD7B", "SST_NOS1", "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH",
+                  "TBD", "Neu_dev_THY1")
+
+# Filter data for glia
+glia_data <- plot_data[plot_data$annol4 %in% glia_types, ]
+
+# Filter data for neurons
+neuron_data <- plot_data[plot_data$annol4 %in% neuron_types, ]
+
+# Create the glia plot
+glia_plot <- ggplot(glia_data, aes(x=annol4, y=nCount_RNA, fill=annol4)) + 
+  geom_violin(trim=FALSE, scale="width") +  # Broader violin plots
+  geom_boxplot(width=0.3, outlier.shape=NA) +  # Add boxplot with median and quartiles
+  geom_jitter(width=0.2, size=0.1, alpha=0.01) +  # Add data points with low opacity
+  labs(y="UMIs per Cell", x=element_blank(), title="UMIs per Cell Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +  # Center the title
+  scale_y_continuous(breaks = seq(0, 35000, by = 7500), limits = c(0, 3.5e4))  # Add more y-axis ticks and set limits
+
+# Create the neuron plot
+neuron_plot <- ggplot(neuron_data, aes(x=annol4, y=nCount_RNA, fill=annol4)) + 
+  geom_violin(trim=FALSE, scale="width") +  # Broader violin plots
+  geom_boxplot(width=0.3, outlier.shape=NA) +  # Add boxplot with median and quartiles
+  geom_jitter(width=0.2, size=0.1, alpha=0.01) +  # Add data points with low opacity
+  labs(y="UMIs per Cell", x=element_blank(), title="UMIs per cell Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +  # Center the title
+  scale_y_continuous(breaks = seq(0, 60000, by = 10000), limits = c(0, 6e4))  # Add more y-axis ticks and set limits
+
+# Display the plots separately
+glia_plot <- glia_plot %>% rasterize(dpi=600)
+neuron_plot <- neuron_plot %>% rasterize(dpi=600)
+ggsave(plot = glia_plot, filename = "figures/all_cells/UMI_per_cell_glia.pdf",dpi = 600, width = 8,height =5 ,units = "in")
+ggsave(plot = neuron_plot, filename = "figures/all_cells/UMI_per_cell_neurons.pdf",dpi = 600, width = 14,height = 4,units = "in")
+```
+
+###Genes
+
+```{r fig.height=5, fig.width=14}
+# Define glia and neuron cell types
+glia_types <- c("Astrocytes", "Microglia", "Oligodendrocytes", "OPCs", "Pericytes", "Endothelial cells","Immune cells")
+neuron_types <- c("ID2_CHRNA7_CNR1", "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6", "ID2_LAMP5_CRH", 
+                  "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", "L2_3_CUX2_FREM3_NTNG1", 
+                  "L2_CUX2_LAMP5_PDGFD", "L3_CUX2_SPOCK3_PRSS12", "L4_RORB_SCHLAP1_ARHGAP15", 
+                  "L4_RORB_SCHLAP1_MET", "L4_RORB_SCHLAP1_MME", "L5_6_FEZF2_LRRK1_PCP4", 
+                  "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", "L5_6_FEZF2_TLE4_HTR2C", 
+                  "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", "L5_6_THEMIS_SEMA3A", 
+                  "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH", "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", 
+                  "VIP_TYR", "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B", "SST_CALB1", 
+                  "SST_ISOC_THSD7B", "SST_NOS1", "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH",
+                  "TBD", "Neu_dev_THY1")
+
+# Filter data for glia
+glia_data <- plot_data[plot_data$annol4 %in% glia_types, ]
+
+# Filter data for neurons
+neuron_data <- plot_data[plot_data$annol4 %in% neuron_types, ]
+
+# Create the glia plot
+glia_plot <- ggplot(glia_data, aes(x=annol4, y=nFeature_RNA, fill=annol4)) + 
+  geom_violin(trim=FALSE, scale="width") +  # Broader violin plots
+  geom_boxplot(width=0.3, outlier.shape=NA) +  # Add boxplot with median and quartiles
+  geom_jitter(width=0.2, size=0.1, alpha=0.01) +  # Add data points with low opacity
+  labs(y="Genes per Cell", x=element_blank(), title="Genes per Cell Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +  # Center the title
+  scale_y_continuous(breaks = seq(0, 7.5e3, by = 1500), limits = c(0, 7.5e3))  # Add more y-axis ticks and set limits
+
+# Create the neuron plot
+neuron_plot <- ggplot(neuron_data, aes(x=annol4, y=nFeature_RNA, fill=annol4)) + 
+  geom_violin(trim=FALSE, scale="width") +  # Broader violin plots
+  geom_boxplot(width=0.3, outlier.shape=NA) +  # Add boxplot with median and quartiles
+  geom_jitter(width=0.2, size=0.1, alpha=0.01) +  # Add data points with low opacity
+  labs(y="Genes per Cell", x=element_blank(), title="Genes per cell Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +  # Center the title
+  scale_y_continuous(breaks = seq(0, 1e4, by = 2000), limits = c(0, 1e4))  # Add more y-axis ticks and set limits
+
+# Display the plots separately
+glia_plot <- glia_plot %>% rasterize(dpi=600)
+neuron_plot <- neuron_plot %>% rasterize(dpi=600)
+ggsave(plot = glia_plot, filename = "figures/all_cells/genes_per_cell_glia.pdf",dpi = 600, width = 8,height =5 ,units = "in")
+ggsave(plot = neuron_plot, filename = "figures/all_cells/genes_per_cell_neurons.pdf",dpi = 600, width = 14,height =4 ,units = "in")
+```
+

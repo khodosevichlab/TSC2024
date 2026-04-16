@@ -1,0 +1,531 @@
+---
+title: "RNAScope excitatory marker validation"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+
+```{r LIBS}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(ggpubr)
+library(ARTool)
+library(emmeans)
+library(readr)
+```
+
+
+## Relative densities (no. of  positive cells in bin / total positive cells in cortical column per gene between conditions (Analysis of Variance of Aligned Rank Transformed Data):
+# Fig 7g
+```{r fig.height=5.5, fig.width=3}
+# Load data
+data <- read.csv("RNAscope_data_for_R.csv", header = TRUE)
+
+genes_of_interest <- c("CUX2", "RORB", "FEZF2")
+
+# Prepare data
+long_data <- data %>%
+  mutate(Condition = ifelse(grepl("control", Sample, ignore.case = TRUE), "Control", "TSC")) %>%
+  pivot_longer(cols = all_of(genes_of_interest), names_to = "Gene", values_to = "RawCount") %>%
+  group_by(Sample, Gene) %>%
+  mutate(TotalCount = sum(RawCount[Bin %in% 1:7], na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(
+    RelativeCount = RawCount / TotalCount,
+    Gene = factor(Gene, levels = genes_of_interest),
+    Bin = factor(Bin, levels = as.character(1:7)),
+    Condition = factor(Condition)
+  )
+
+long_data$Gene <- factor(long_data$Gene,
+                            levels = genes_of_interest)
+
+# --- 1) Run ART per gene and extract overall Condition p-value ---
+art_results <- lapply(genes_of_interest, function(gene_name) {
+  df <- long_data %>% filter(Gene == gene_name, !is.na(RelativeCount))
+  art_mod <- art(RelativeCount ~ Condition * Bin, data = df)
+  anova_res <- anova(art_mod)
+  
+  # Overall Condition p-value
+  cond_p <- anova_res["Condition", "Pr(>F)"]
+  
+  list(gene = gene_name, art_mod = art_mod, condition_p = cond_p)
+})
+
+overall_pvals <- data.frame(
+  Gene = sapply(art_results, `[[`, "gene"),
+  Condition_overall_p = sapply(art_results, `[[`, "condition_p"),
+  p_label = paste0("p=", round(sapply(art_results, `[[`, "condition_p"), 3))
+)
+
+# --- 2) Posthoc: pairwise per Bin ---
+posthoc_list <- lapply(art_results, function(res) {
+  df <- long_data %>% filter(Gene == res$gene, !is.na(RelativeCount))
+  
+  # Extract lm object for interaction term
+  art_lm <- artlm(res$art_mod, "Condition:Bin")
+  
+  # Compute estimated marginal means
+  emm <- emmeans(art_lm, ~ Condition | Bin)
+  pw <- contrast(emm, method = "pairwise")
+  pw_df <- as.data.frame(pw)
+  
+  # Bonferroni correction
+  pw_df$p.adj <- p.adjust(pw_df$p.value, method = "bonferroni")
+  pw_df <- pw_df %>% mutate(
+    signif = ifelse(p.adj < 0.05, TRUE, FALSE),
+    Gene = res$gene
+  )
+  pw_df
+})
+
+posthoc_df <- do.call(rbind, posthoc_list)
+overall_pvals$Gene <- factor(overall_pvals$Gene, levels = genes_of_interest)
+posthoc_df$Gene <- factor(posthoc_df$Gene, levels = genes_of_interest)
+
+# --- 3) Plot ---
+gg_panelH <- ggplot(long_data, aes(x = Bin, y = RelativeCount, color = Condition)) +
+  geom_jitter(aes(shape = Condition), width = 0.1, size = 1.5, alpha = 0.9) +
+  stat_summary(fun = mean, geom = "line", aes(group = Condition, linetype = Condition), size = 0.9) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", aes(group = Condition), width = 0.3) +
+  geom_text(
+    data = posthoc_df %>% filter(signif == TRUE),
+    aes(x = Bin, y = 1.05, label = "*"), # 1.05 is relative; adjust per gene if needed
+    inherit.aes = FALSE,
+    size = 4
+  ) +
+  geom_text(
+    data = overall_pvals,
+    aes(x = 6, y = 1.1, label = p_label),
+    inherit.aes = FALSE,
+    size = 3.5
+  ) +
+  facet_wrap(~Gene, scales = "free_y", ncol = 1, drop=FALSE) +
+  scale_color_manual(values = c("Control" = "dodgerblue3", "TSC" = "deeppink3")) +
+  scale_shape_manual(values = c("Control" = 16, "TSC" = 17)) +
+  scale_linetype_manual(values = c("Control" = "solid", "TSC" = "solid")) +
+  labs(x = "Bin", y = "Relative density") +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+
+gg_panelH
+
+
+ggsave(plot = gg_panelH,
+       filename = "figures/RNAscope_relative_abundance_lines_new.pdf",
+       dpi = 600,
+       height = 5.5,
+       width = 3.5)
+
+write_csv(posthoc_df, "RNAscope_Statistics_CUX2_RORB_FEZF2_relative_abundance_posthoc.csv")
+
+```
+
+
+## Boxplots for total cell density over cortical column
+# Fig 7h
+```{r fig.height=5, fig.width=3.5}
+# Required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(exactRankTests)
+
+# Load data
+data <- read.csv("RNAscope_data_for_R.csv",header = T)
+
+# Annotate condition
+data <- data %>%
+  mutate(Condition = ifelse(grepl("control", Sample, ignore.case = TRUE), "Control", "TSC")) 
+
+# Markers
+genes <- c("CUX2", "RORB", "FEZF2", "CUX2.RORB", "RORB.FEZF2", "CUX2.FEZF2")
+area_mm2 <- 0.4138*7 # Bin-size in mm^2 * total number of bins
+
+# Calculate densities
+density_data <- data %>%
+  #filter(Sample != "tsc-04") %>%
+  filter(Bin %in% 1:7) %>%
+  group_by(Sample, Condition) %>%
+  summarise(across(all_of(genes), sum, na.rm = TRUE), .groups = "drop") %>%
+  pivot_longer(cols = all_of(genes), names_to = "Gene", values_to = "PositiveCells") %>%
+  mutate(Density = PositiveCells / area_mm2)
+
+# Set factor levels
+density_data$Gene <- factor(density_data$Gene,
+                            levels = c("CUX2", "RORB", "FEZF2", "CUX2.RORB", "RORB.FEZF2", "CUX2.FEZF2"))
+
+# Max y for text placement
+y_max <- density_data %>%
+  group_by(Gene) %>%
+  summarise(y.position = max(Density) * 1.1, .groups = "drop")
+
+# Wilcoxon exact test per gene
+stats_table <- density_data %>%
+  group_by(Gene) %>%
+  summarise(
+    p_value = wilcox.exact(Density ~ Condition, data = cur_data(), exact = TRUE)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adj = p.adjust(p_value, method = "fdr"),
+    p_signif = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01 ~ "**",
+      p_adj < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  ) %>%
+  left_join(y_max, by = "Gene") %>%
+  mutate(x = 1.5)
+
+stats_table <- stats_table %>%
+  mutate(
+    p_label = paste0((p_signif),"\np=", sprintf("%.3f", p_adj))
+  )
+
+
+# Plot
+gg_density_boxplot <- ggplot(density_data, aes(x = Condition, y = Density, fill = Condition)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8, width = 0.6) +
+  geom_jitter(aes(shape = Condition), width = 0.15, size = 2, alpha = 0.7) +
+ geom_text(
+  data = stats_table,
+  aes(x = x, y = y.position, label = p_label),
+  size = 3.5,
+  lineheight=0.8,
+  vjust=-.5,
+  inherit.aes = FALSE ) +
+  facet_wrap(~Gene, ncol = 3, nrow = 2, scales = "free_y") +
+  scale_fill_manual(values = c("Control" = "dodgerblue2", "TSC" = "deeppink3")) +
+  scale_shape_manual(values = c("Control" = 16, "TSC" = 17)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.3))) +
+  labs(
+    x = NULL,
+    y = expression("Cell density ("*cells/mm^2*")")
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 9),
+    axis.text.x = element_blank()
+  )
+
+# View results
+print(stats_table)
+print(gg_density_boxplot)
+
+ggsave(plot = gg_density_boxplot,
+       filename = "figures/RNAscope_Boxplot_exci_Total_Positive_cell_density.pdf",
+       dpi = 600,
+       height = 5,
+       width = 3.5)
+
+write_csv(stats_table, "stats_table_RNAscope_Boxplot_exci_Total_Positive_cell_density.csv")
+
+
+```
+```{r}
+# Calculate Wilcoxon test and adjusted p-values per gene
+stats_table <- density_data %>%
+  group_by(Gene) %>%
+  summarise(
+    p_value = exactRankTests:::wilcox.exact(Density ~ Condition)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adj = p.adjust(p_value, method = "fdr"),
+    p_signif = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01 ~ "**",
+      p_adj < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+
+# View results
+print(stats_table)
+
+```
+
+## CUX2 ratio across upper and lower layers (bins)
+```{r fig.height=2.5, fig.width=1.5}
+# Prepare ratio data, impute 1 for bin5_7 == 0
+ratio_data <- data %>%
+  filter(Bin %in% 1:7) %>%
+  group_by(Sample, Condition) %>%
+  summarise(
+    bin1_3 = sum(CUX2[Bin %in% 1:3], na.rm = TRUE),
+    bin5_7 = sum(CUX2[Bin %in% 5:7], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Replace 0 in bin5_7 with 1
+  mutate(bin5_7 = ifelse(bin5_7 == 0, 1, bin5_7)) %>%
+  mutate(Ratio = bin1_3 / bin5_7)
+
+# Compute Wilcoxon test
+ratio_test <- wilcox.test(Ratio ~ Condition, data = ratio_data, exact = FALSE)
+p_label_ratio <- paste0("p=", sprintf("%.2f", ratio_test$p.value))
+
+# Plot as violin + boxplot
+gg_ratio_violin <- ggplot(ratio_data, aes(x = Condition, y = Ratio, fill = Condition)) +
+  geom_violin(trim = T, width = 0.6, alpha = 0.7) +
+  geom_boxplot(width = 0.2, outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.1, size = 1.6, alpha = 0.85) +
+  annotate(
+    "text",
+    x = 1.5,
+    y = max(ratio_data$Ratio, na.rm = TRUE) * 1.05,
+    label = p_label_ratio,
+    size = 3
+  ) +
+  scale_fill_manual(values = c("Control" = "dodgerblue2", "TSC" = "deeppink3")) +
+  labs(y = "Bin ratio (1–3 / 5–7)",
+       x = NULL,
+       title = "CUX2") +
+  theme_minimal() +
+  theme(title = element_text(face="bold"),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    strip.text = element_text(face = "bold", size = 9),
+    axis.text.x = element_blank()
+  )
+
+gg_ratio_violin
+
+ggsave(plot = gg_ratio_violin,
+       filename = "figures/RNAscope_Boxplot_CUX2_ratio_bin1-3vs1-7.pdf",
+       dpi = 600,
+       height = 2.5,
+       width = 1.5)
+```
+
+## Do comparison of summarized bins between condition:
+```{r }
+library(dplyr)
+library(tidyr)
+
+# Summarize per sample for upper and lower bins
+ratio_data_long <- ratio_data %>%
+  mutate(
+    BinGroup = "Bin1-3",
+    Value = bin1_3
+  ) %>%
+  dplyr::select(Sample, Condition, BinGroup, Value) %>%
+  bind_rows(
+    ratio_data %>%
+      mutate(
+        BinGroup = "Bin5-7",
+        Value = bin5_7
+      ) %>%
+      dplyr::select(Sample, Condition, BinGroup, Value)
+  ) %>%
+  mutate(BinGroup = factor(BinGroup, levels = c("Bin1-3", "Bin5-7")))
+
+```
+
+# Fig 7i CUX2 panels
+```{r fig.height=2.5, fig.width=2.5}
+stats_ratio <- ratio_data_long %>%
+  group_by(BinGroup) %>%
+  summarise(
+    p_val = wilcox.test(Value ~ Condition)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adj = p.adjust(p_val, method = "fdr"),   # FDR correction
+    p_sign = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01  ~ "**",
+      p_adj < 0.05  ~ "*",
+      TRUE ~ "ns"
+    ),
+    x = 1.5,  # midpoint between Control and TSC
+    y.position = ratio_data_long %>%
+      group_by(BinGroup) %>%
+      summarise(max_val = max(Value, na.rm = TRUE)) %>%
+      pull(max_val) * 1.05,
+    p_label = paste0(p_sign, "\np=", sprintf("%.3f", p_adj))
+   )
+
+
+gg_ratio_box <- ggplot(ratio_data_long, aes(x = Condition, y = Value, fill = Condition, shape = Condition)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8, width = 0.6) +
+  geom_jitter(width = 0.15, size = 2, alpha = 0.7) +
+  geom_text(
+    data = stats_ratio,
+    aes(x = x, y = y.position, label = p_label),
+    inherit.aes = FALSE,
+    size = 3.5,
+    lineheight = 0.8,
+    vjust = -0.5
+  ) +
+  facet_wrap(~BinGroup, scales = "free_y") +
+  scale_fill_manual(values = c("Control" = "dodgerblue2", "TSC" = "deeppink3")) +
+  scale_shape_manual(values = c("Control" = 16, "TSC" = 17)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.3))) +
+  labs(y = "CUX2 positive cells", x = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    strip.text = element_text(face = "bold", size = 9),
+    axis.text.x = element_blank()
+  )
+
+#Plot
+gg_ratio_box
+ggsave(plot = gg_ratio_box,
+       filename = "figures/RNAscope_Boxplot_CUX2_positive_cells_1-3+1-7_conditions.pdf",
+       dpi = 600,
+       height = 2.5,
+       width = 2.5)
+
+```
+
+
+## And now for FEZF2
+```{r fig.height=2.5, fig.width=1.5}
+# Prepare ratio data, impute 1 for bin5_7 == 0
+ratio_data <- data %>%
+  filter(Bin %in% 1:7) %>%
+  group_by(Sample, Condition) %>%
+  summarise(
+    bin1_3 = sum(FEZF2[Bin %in% 1:3], na.rm = TRUE),
+    bin5_7 = sum(FEZF2[Bin %in% 5:7], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Replace 0 in bin5_7 with 1
+  mutate(bin5_7 = ifelse(bin5_7 == 0, 1, bin5_7)) %>%
+  mutate(Ratio = bin1_3 / bin5_7)
+
+# Compute Wilcoxon test
+ratio_test <- wilcox.test(Ratio ~ Condition, data = ratio_data, exact = FALSE)
+p_label_ratio <- paste0("p=", sprintf("%.2f", ratio_test$p.value))
+
+# Plot as violin + boxplot
+gg_ratio_violin <- ggplot(ratio_data, aes(x = Condition, y = Ratio, fill = Condition)) +
+  geom_violin(trim = T, width = 0.6, alpha = 0.7) +
+  geom_boxplot(width = 0.2, outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.1, size = 1.6, alpha = 0.85) +
+  annotate(
+    "text",
+    x = 1.5,
+    y = max(ratio_data$Ratio, na.rm = TRUE) * 1.05,
+    label = p_label_ratio,
+    size = 3
+  ) +
+  scale_fill_manual(values = c("Control" = "dodgerblue2", "TSC" = "deeppink3")) +
+  labs(y = "Bin ratio (1–3 / 5–7)",
+       x = NULL,
+       title = "FEZF2") +
+  theme_minimal() +
+  theme(title = element_text(face="bold"),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    strip.text = element_text(face = "bold", size = 9),
+    axis.text.x = element_blank()
+  )
+
+gg_ratio_violin
+
+ggsave(plot = gg_ratio_violin,
+       filename = "figures/RNAscope_Boxplot_FEZF2_ratio_bin1-3vs1-7.pdf",
+       dpi = 600,
+       height = 2.5,
+       width = 1.5)
+```
+
+```{r }
+library(dplyr)
+library(tidyr)
+
+# Summarize per sample for upper and lower bins
+ratio_data_long <- ratio_data %>%
+  mutate(
+    BinGroup = "Bin1-3",
+    Value = bin1_3
+  ) %>%
+  dplyr::select(Sample, Condition, BinGroup, Value) %>%
+  bind_rows(
+    ratio_data %>%
+      mutate(
+        BinGroup = "Bin5-7",
+        Value = bin5_7
+      ) %>%
+      dplyr::select(Sample, Condition, BinGroup, Value)
+  ) %>%
+  mutate(BinGroup = factor(BinGroup, levels = c("Bin1-3", "Bin5-7")))
+
+```
+
+# Fig 7i FEZF2 panels
+```{r fig.height=2.5, fig.width=2.5}
+stats_ratio <- ratio_data_long %>%
+  group_by(BinGroup) %>%
+  summarise(
+    p_val = wilcox.test(Value ~ Condition)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adj = p.adjust(p_val, method = "fdr"),   # FDR correction
+    p_sign = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01  ~ "**",
+      p_adj < 0.05  ~ "*",
+      TRUE ~ "ns"
+    ),
+    x = 1.5,  # midpoint between Control and TSC
+    y.position = ratio_data_long %>%
+      group_by(BinGroup) %>%
+      summarise(max_val = max(Value, na.rm = TRUE)) %>%
+      pull(max_val) * 1.05,
+    p_label = paste0(p_sign, "\np=", sprintf("%.3f", p_adj))
+   )
+
+
+gg_ratio_box <- ggplot(ratio_data_long, aes(x = Condition, y = Value, fill = Condition, shape = Condition)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8, width = 0.6) +
+  geom_jitter(width = 0.15, size = 2, alpha = 0.7) +
+  geom_text(
+    data = stats_ratio,
+    aes(x = x, y = y.position, label = p_label),
+    inherit.aes = FALSE,
+    size = 3.5,
+    lineheight = 0.8,
+    vjust = -0.5
+  ) +
+  facet_wrap(~BinGroup, scales = "free_y") +
+  scale_fill_manual(values = c("Control" = "dodgerblue2", "TSC" = "deeppink3")) +
+  scale_shape_manual(values = c("Control" = 16, "TSC" = 17)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.3))) +
+  labs(y = "FEZF2 positive cells", x = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    strip.text = element_text(face = "bold", size = 9),
+    axis.text.x = element_blank()
+  )
+
+#Plot
+gg_ratio_box
+
+ggsave(plot = gg_ratio_box,
+       filename = "figures/RNAscope_Boxplot_FEZF2_positive_cells_1-3+1-7_conditions.pdf",
+       dpi = 600,
+       height = 2.5,
+       width = 2.5)
+
+
+```
+```{r}
+sessionInfo()
+```
+

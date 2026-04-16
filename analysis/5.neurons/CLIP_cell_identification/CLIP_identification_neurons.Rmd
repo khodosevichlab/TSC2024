@@ -1,0 +1,256 @@
+---
+title: "CLIP cell identification"
+output: html_notebook
+seed: 1
+---
+##LIBS
+
+```{r}
+library(dplyr)
+library(magrittr)
+library(conos)
+library(pagoda2)
+library(scHelper)
+library(cacoa)
+set.seed(1)
+library(ggplot2)
+library(ggrastr)
+library(cowplot)
+library(HDF5Array)
+library(Seurat)
+library(SeuratObject)
+library(scHelper)
+```
+
+```{r}
+# Check if 'figure' folder exists, if not, create it
+if (!dir.exists("figures")) {
+  dir.create("figures")
+  cat("Created 'figures' folder\n")
+} else {
+  cat("'figures' folder already exists\n")
+}
+
+```
+
+##Load objects
+
+```{r}
+con_n <- readRDS("../../5.neurons/con_neurons.rds")
+cao_n <- readRDS("../../5.neurons/cao_neurons.rds")
+seu <- readRDS("../../../TSC2024_data_files/5.neurons/seurat_neurons.rds")
+```
+
+## Set annotation level and UMAP
+```{r}
+# Level
+head(seu@meta.data)
+cell.types <- seu@meta.data$annol4 %>% levels
+cell.types
+Idents(seu) <- "annol4"
+
+# UMAP
+umap_conos <- con_n$embeddings$UMAP %>% as.data.frame()
+colnames(umap_conos) <- c("UMAP_1","UMAP_2")
+umap_conos <- umap_conos[Cells(seu), , drop = FALSE]
+umap_conos <- CreateDimReducObject(embeddings = as.matrix(umap_conos), key="UMAPCON_", assay = DefaultAssay((seu)))
+seu[["umap_conos"]] <- umap_conos
+```
+
+##Cell type plot order
+```{r}
+sorted_types <- c(
+  "L2_3_CUX2_FREM3_NTNG1",
+  "L2_CUX2_LAMP5_PDGFD",
+  "L3_CUX2_SPOCK3_PRSS12",
+  "L4_RORB_SCHLAP1_ARHGAP15",
+  "L4_RORB_SCHLAP1_MET",
+  "L4_RORB_SCHLAP1_MME",
+  "L5_6_FEZF2_LRRK1_PCP4",
+  "L5_6_FEZF2_LRRK1_SEMA3E",
+  "L5_6_FEZF2_TLE4_ABO",
+  "L5_6_FEZF2_TLE4_HTR2C",
+  "L5_6_FEZF2_TLE4_SCUBE1",
+  "L5_6_THEMIS_NR4A2_NTNG2",
+  "L5_6_THEMIS_SEMA3A",
+  "Neu_dev_THY1",
+  "TBD",
+  "ID2_CHRNA7_CNR1",
+  "ID2_CHRNA7_NCKAP5",
+  "ID2_CHRNA7_PAX6",
+  "ID2_LAMP5_CRH",
+  "ID2_LAMP5_MEIS2",
+  "ID2_LAMP5_NMBR",
+  "ID2_LAMP5_NOS1",
+  "VIP_ABI3BP",
+  "VIP_CBLN1",
+  "VIP_CRH",
+  "VIP_NRG1",
+  "VIP_SEMA3C",
+  "VIP_TRPM3_SSTR1",
+  "VIP_TYR",
+  "PVALB_BTBD11",
+  "PVALB_LGR5",
+  "PVALB_MEPE",
+  "PVALB_UNC5B",
+  "SST_CALB1",
+  "SST_ISOC_THSD7B",
+  "SST_NOS1",
+  "SST_NPY",
+  "SST_STK32A",
+  "SST_TAC3",
+  "SST_TH"
+)
+
+# Apply factor level order
+seu@active.ident <- factor(Idents(seu), levels = sorted_types)
+```
+# Extended data fig. 9a
+```{r fig.height=7, fig.width=12}
+# Updated CLIP markers based on Eichmüller et al. (2022)
+# CLIP markers expressed in cortical tubers
+clip_markers <- c("EDNRB", "PTGDS", "EGFR", "PROX1", "NR2F2", "SP8", "SCGN")
+
+# Exclusion markers (non-CLIP or late-appearing lineages)
+exclude_markers <- c("PAX6", "EOMES", "OLIG2", "NKX2-1", "GFAP", "PVALB", "SATB2")
+
+plot_markers <- c( "SST","PVALB","NKX2-1","LHX6","EDNRB", "PTGDS", "EGFR", "PROX1", "NR2F2", "SP8", "SCGN","GAD1", "EOMES", "OLIG2",  "GFAP", "SATB2","RBFOX3")
+
+#DotPlot(seu, features = clip_markers, cols = c("blue", "red"), dot.scale = 8) + RotatedAxis()
+#DotPlot(seu, features = exclude_markers, cols = c("blue", "red"), dot.scale = 8) +   RotatedAxis()
+DotPlot(seu, features = plot_markers,  dot.scale = 8) +
+  scale_color_distiller(palette = "PuOr",limits = c(-2, 2), oob = scales::squish) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  coord_flip()+
+  xlab(NULL) +
+  ylab(NULL)
+
+filename = "figures/CLIP_dotplot_marker_expression.pdf"
+pdf.width = 11.5
+pdf.height = 6.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+## Estimate scores
+```{r fig.height=5, fig.width=16.5}
+seu <- AddModuleScore(seu, features = list(clip_markers), name = "CLIP_Score", )
+seu <- AddModuleScore(seu, features = list(exclude_markers), name = "Exclude_Score")
+```
+
+## Plot scores
+# Extended data fig. 9b,c,d
+```{r fig.height=6, fig.width=16.4}
+library(patchwork)
+# Create individual FeaturePlots
+p1 <- DimPlot(seu, reduction = "umap_conos",group.by = "annol4",pt.size = 0.05,alpha = 0.3,shuffle = T,repel = T, label = F, label.size = 2.5) +
+  NoLegend() +
+  ggtitle("Annotation") +  
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    axis.line = element_blank()
+  )
+p1 <- LabelClusters(
+  plot = p1,
+  id = "annol4",
+  repel = TRUE,
+  size = 2.5,
+  fontface = "bold"
+  )
+p1 <- p1 %>% rasterize(dpi=600)
+p2 <- FeaturePlot(seu, features = "CLIP_Score1", reduction = "umap_conos",pt.size = 0.05,alpha = 0.3) +
+  scale_color_distiller(palette = "YlOrBr", oob = scales::squish, direction = 1) +
+    ggtitle("CLIP score") +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    axis.line = element_blank()
+  )
+p2 <- p2 %>% rasterize(dpi=600)
+p3 <- FeaturePlot(seu, features = "Exclude_Score1", reduction = "umap_conos",pt.size = 0.05,alpha = 0.3) +
+  scale_color_distiller(palette = "YlOrBr", oob = scales::squish, direction = 1) +  
+  ggtitle("Exclude score") +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    axis.line = element_blank()
+  ) 
+p3 <- p3 %>% rasterize(dpi=600)
+plot_grid(p1, p2, p3, ncol = 3, rel_widths = c(5, 5.7, 5.7))
+filename = "figures/CLIP_UMAP_scores.pdf"
+pdf.width = 16.4
+pdf.height = 5.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+##Plot score on UMAP
+# Extended data fig. 9e
+```{r fig.height=5, fig.width=5.5}
+clip_cells <- WhichCells(seu, expression = CLIP_Score1 > 0.5 & Exclude_Score1 < 0.2)
+seu$CLIP_candidate <- ifelse(colnames(seu) %in% clip_cells, "CLIP", "Other")
+
+p4 <- DimPlot(seu, group.by = "CLIP_candidate", reduction = "umap_conos",pt.size = 0.05, alpha=0.3,cols = c("CLIP" = "#8E44AD","Other" = "#BDC3C7"))+
+    ggtitle("CLIP cell candidates") +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    axis.line = element_blank()
+  )
+p4 <- p4 %>% rasterize(dpi=600)
+p4
+filename = "figures/CLIP_UMAP_candidates.pdf"
+pdf.width = 5.7
+pdf.height = 5.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## Frequency of CLIP cells
+```{r}
+clip_table <- table(seu$CLIP_candidate, seu$condition) %>% print()
+prop.table(table(seu$CLIP_candidate, seu$condition), margin = 2)
+```
+
+## Boxplot control vs TSC
+# Extended data fig. 9f
+```{r}
+library(ggpubr)
+# Extract metadata
+meta <- seu@meta.data
+
+# Count cells per group and sample
+counts <- meta %>%
+  group_by(sample = sample, group = CLIP_candidate, condition = condition) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = group, values_from = n, values_fill = 0) %>%
+  mutate(total = CLIP + Other,
+         prop_clip = CLIP / total)
+
+
+ggplot(counts, aes(x = condition, y = prop_clip, fill=condition)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.3,) +
+  geom_jitter(width = 0.2, size = 2, color = "black", alpha = 0.8) +
+  stat_compare_means(method = "wilcox.test", label.y = 0.07, label.x = 1.5, size = 5) +
+  scale_fill_manual(values = c("Control" = "dodgerblue3", "TSC2" = "deeppink3"))+
+  labs(x = "Condition", y = "CLIP cell proportion") +
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 0),)
+
+wilcox.test(prop_clip ~ condition, data = counts)
+
+filename = "figures/CLIP_boxplot_control_vs_TSC.pdf"
+pdf.width = 6
+pdf.height = 6
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+```{r session-info}
+sessionInfo()
+```

@@ -1,0 +1,305 @@
+---
+title: "snRNA-seq TSC2 preprocessing without Cellbender"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+### Setup libraries
+```{r setup}
+library(dplyr)
+library(magrittr)
+library(conos)
+library(pagoda2)
+library(cacoa)
+library(reticulate)
+library(ggplot2)
+library(ggrastr)
+library(cowplot)
+library(HDF5Array)
+library(Seurat)
+library(CRMetrics)
+library(scHelper)
+set.seed(1)
+```
+
+```{r message=FALSE, include=FALSE}
+# Check if 'data' folder exists, if not, create it
+if (!dir.exists("data")) {
+  dir.create("data")
+  cat("Created 'data' folder\n")
+} else {
+  cat("'data' folder already exists\n")
+}
+
+# Check if 'figure' folder exists, if not, create it
+if (!dir.exists("figures")) {
+  dir.create("figures")
+  cat("Created 'figures' folder\n")
+} else {
+  cat("'figures' folder already exists\n")
+}
+
+```
+
+# CRMetrics
+## Make object and load count matrices
+### Replace data path with the location you store the count matrices. 
+```{r}
+data_path= "pathtocountmatrices"
+crm <- CRMetrics$new(data.path = data_path, n.cores = 100)
+crm$addCms()
+```
+
+```{r}
+crm$selectMetrics()
+```
+
+```{r fig.height=12, fig.width=12}
+metrics.to.plot <- crm$selectMetrics(ids = c(1:4,6,18,19,15,9))
+crm$plotSummaryMetrics(metrics = metrics.to.plot, 
+                       plot.geom = "bar")
+filename = "figures/Metrics_cellranger.pdf"
+pdf.width = 12
+pdf.height = 12
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+```{r}
+crm$addDetailedMetrics(n.cores = 100)
+```
+
+```{r fig.height=4, fig.width=8}
+metrics.to.plot <- crm$detailed.metrics$metric %>%
+  unique()
+crm$plotDetailedMetrics(metrics = metrics.to.plot, 
+                        plot.geom = "violin")
+```
+## Preprocess count matrices with pagoda2 and make initial conos object:
+
+```{r include=FALSE}
+crm$doPreprocessing(n.cores = 100)
+```
+```{r include=FALSE}
+crm$createEmbedding(n.cores = 100)
+```
+
+
+```{r fig.height=20, fig.width=15}
+c("RBFOX3","GAD1","SLC17A7","VIP","ID2","SST","PVALB","MOG","VCAN","CSF1R","AQP4","CLDN5") %>%
+  lapply(function(g) crm$con$plotGraph(gene=g, title=g, size=0.1, alpha=1) %>% rasterize(dpi=600) + 
+           theme_void() + 
+           theme(legend.position = "none")) %>%
+  cowplot::plot_grid(plotlist=., ncol=3) %>% rasterize(dpi=300)
+filename = "figures/Markers_pre_filter.pdf"
+pdf.width = 15
+pdf.height = 20
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+joint <- crm$con$getJointCountMatrix()
+```
+
+```{r}
+native <- getConosCluster(crm$con)
+```
+
+```{r fig.height=6, fig.width=9 }
+markers<- c("RBFOX3","GAD1","SLC17A7","VIP","ID2","SST","PVALB","MOG","VCAN","CSF1R","AQP4","CLDN5")
+sccore:::dotPlot(markers, joint, cell.groups = native, gene.order = markers,col.max = 1.5)+scale_color_viridis_c()
+filename = "figures/dotplot_markers_prefilter.pdf"
+pdf.width = 9
+pdf.height = 6
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## General embedding
+```{r fig.height=8, fig.width=10}
+crm$con$plotGraph(size=0.1, shuffle.colors=T, alpha=0.2, font.size=3) %>% rasterize(dpi=600) +
+  theme_void()
+filename = "figures/UMAP_prefilter.pdf"
+pdf.width = 10
+pdf.height = 8
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+## Depth filtering 
+
+```{r fig.height=8, fig.width=8}
+p <- crm$plotEmbedding(depth = TRUE, depth.cutoff = 750) +
+  theme_void() +
+  theme(legend.position = "none") +
+  xlab("UMAP1") +
+  ylab("UMAP2") 
+ggsave(plot = p, filename = "figures/UMAP_depth_pre_filter.pdf",dpi=300,width = 10, height = 8,)
+p
+```
+
+
+## Doublet detection 
+```{r eval=FALSE, include=FALSE}
+library(reticulate)
+conda_create("r-reticulate", 
+             conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+             python_version = 3.8)
+conda_install("r-reticulate", 
+              conda = "/opt/software/miniconda/4.12.0/condabin/conda", 
+              pip = TRUE, 
+              packages = c("scrublet","doubletdetection"))
+```
+### Scrublet
+```{r}
+crm$detectDoublets(conda.path = "/opt/software/miniconda/4.12.0/condabin/conda", method = "scrublet",env = "r-reticulate", verbose = T)
+```
+
+```{r fig.height=8, fig.width=8}
+crm$plotEmbedding(doublet.method = "scrublet") +
+  theme_minimal() +
+  xlab("UMAP1") +
+  ylab("UMAP2") +
+  theme(legend.position = "none")
+
+filename = "figures/UMAP_scrublet.pdf"
+pdf.width = 9
+pdf.height = 9
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r fig.height=8, fig.width=8}
+crm$plotEmbedding(doublet.method = "scrublet", 
+             doublet.scores = TRUE) +
+  theme_minimal() +
+  xlab("UMAP 1") +
+  ylab("UMAP 2")
+```
+
+## Mitochondrial gene fraction 
+
+```{r fig.height=8, fig.width=8}
+crm$plotEmbedding(mito.frac = TRUE, 
+             mito.cutoff = 0.05, 
+             species = "human") +
+  theme_minimal() +
+  xlab("UMAP 1") +
+  ylab("UMAP 2") +
+  theme(legend.position = "none")
+
+filename = "figures/UMAP_mitofrac.pdf"
+pdf.width = 9
+pdf.height = 9
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r fig.height=6, fig.width=10}
+dspc <- crm$con$getDatasetPerCell()
+group.per.cell <- dspc %>% as.character()
+
+mito_frac <- mitoFraction(crm$con, "human")
+
+ggplot(data.frame(Mito=mito_frac, Group=group.per.cell), aes(Group, Mito)) + ggbeeswarm::geom_quasirandom(size=0.1) %>% rasterize(dpi=600)+
+  geom_hline(yintercept = 0.05, col="red")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ylab("Mitochondrial gene fraction") +
+  xlab("Sample") +
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.border = element_blank())
+
+
+filename = "figures/mitofraction_sample_scatter_all_cells.pdf"
+pdf.width = 10
+pdf.height = 6
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+## Scrublet filter plots
+```{r fig.height=8, fig.width=10}
+crm$plotFilteredCells(type="embedding",
+                      depth = TRUE, 
+                      depth.cutoff = 750, 
+                      doublet.method = "scrublet", 
+                      mito.frac = TRUE, 
+                      mito.cutoff = 0.05, 
+                      species = "human",
+                      cols = c("aliceblue","deeppink3","darkblue","orange","tan2","darkcyan","black","chartreuse1")) %>% rasterize(dpi=600) +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(),panel.grid = element_blank(),panel.background = element_blank(),panel.grid.minor = element_blank(),axis.title.x =
+           element_blank(),axis.title.y = element_blank(),axis.ticks.x = element_blank(),axis.ticks.y = element_blank(),axis.text.x  = element_blank(),axis.text.y  = element_blank())
+
+filename = "figures/UMAP_filtered_cells.pdf"
+pdf.width = 11
+pdf.height = 9
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r fig.height=8, fig.width=10}
+crm$plotFilteredCells(type = "bar", 
+                      doublet_method = "scrublet", 
+                      depth = TRUE, 
+                      depth.cutoff = 750, 
+                      mito.frac = TRUE, 
+                      mito.cutoff = 0.05, 
+                      species = "human")
+filename = "figures/bar_plot_filtered_cells.pdf"
+pdf.width = 11
+pdf.height = 9
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+saveRDS(crm, "data/crm_ready_filtering_no_cb.rds", compress=F)
+```
+
+## Filter and save count matrices
+```{r}
+crm$filterCms(depth.cutoff = 0.75e3,
+              mito.cutoff =0.05,
+              species ="human",
+              doublets="scrublet")
+
+saveRDS(crm$cms.filtered, "data/cms_filtered_no_cb_750.rds", compress=F)
+```
+
+
+## Load CMS to make new conos object
+```{r}
+cms <- readRDS("data/cms_filtered_no_cb_750.rds")
+```
+```{r}
+print(length(cms))
+print(length(names(cms)))
+print(any(is.na(names(cms))))
+print(sapply(cms, function(x) any(duplicated(colnames(x)))))
+length(cms) == length(names(cms))
+```
+
+## Make Conos object
+```{r eval=FALSE, include=TRUE}
+con<- quickConos(cms = cms,
+                 sample.names = names(cms), 
+                 make.geneknn = F,
+                 get.largevis = F,
+                 n.odgenes = 3e3,
+                 nPcs = 100,
+                 min.cells.per.gene = 3, 
+                 min.transcripts.per.cell = 200, 
+                 ncomps = 40,
+                 get.tsne = F,
+                 n.cores.p2=100,
+                 n.cores.con=100)
+con <- con$con
+
+saveRDS(object = con, file = "data/con_filtered_no_cb_750.rds", compress = F)
+```
+```{r eval=FALSE, include=FALSE}
+saveRDS(crm, "data/crm_filtered_no_cb.rds", compress=F)
+```
+
+```{r fig.width=9, fig.height=9}
+con$plotGraph(shuffle.colors=T, alpha=0.5, size=0.1, groups = annotation$anno_mid)
+filename = "figures/UMAP_filtered.pdf"
+pdf.width = 9
+pdf.height = 9
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+sessionInfo()
+```
+

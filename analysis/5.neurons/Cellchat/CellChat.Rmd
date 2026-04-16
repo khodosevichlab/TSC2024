@@ -1,0 +1,301 @@
+---
+title: "snRNA-seq TSC2: Case-control analysis - Neurons - Cellchat Ligand receptor interactions"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+### Adapted from cellchat v2 tutorial
+
+# Setup
+
+```{r LIBS}
+library(CellChat)
+library(dplyr)
+library(magrittr)
+ptm = Sys.time()
+library(CellChat)
+library(patchwork)
+library(reticulate)
+```
+
+# Data directories
+```{r}
+data.dir <- './figures/'
+dir.create(data.dir)
+setwd(data.dir)
+ptm = Sys.time()
+```
+
+
+# Load data
+
+```{r Load-data}
+cms <- readRDS("../../5.neurons/cms_neurons.rds")
+metadata <- readRDS("../../../TSC2024_data_files/5.neurons/CellChat/metadata_cell_2.rds")
+annotation <- readRDS("../../../TSC2024_data_files/5.neurons/annotation_neurons.rds")
+anno <- annotation$l4
+```
+
+# Prepare data
+
+```{r Preparedata}
+dat.mat <- cms %>% 
+  sccore:::mergeCountMatrices() %>% 
+  Matrix::drop0() %>% 
+  .[,match(names(anno), colnames(.), nomatch = FALSE)] %>% t()
+```
+
+
+```{r cells to use}
+cell.use.control <- rownames(metadata)[metadata$condition=="Control"]
+cell.use.tsc <- rownames(metadata)[metadata$condition=="TSC2"]
+```
+
+```{r data.input}
+data.input.control <- dat.mat[cell.use.control, ] %>% Matrix::t() %>% normalizeData()
+
+data.input.tsc <- dat.mat[cell.use.tsc, ] %>% Matrix::t() %>% normalizeData()
+```
+
+```{r Meta}
+meta.control <- metadata[cell.use.control, ]
+meta.control %<>% dplyr::rename(samples=sample)
+unique(meta.control$annol4)
+
+meta.tsc <- metadata[cell.use.tsc, ]
+meta.tsc %<>% dplyr::rename(samples=sample)
+unique(meta.tsc$annol4)
+```
+
+# Create object
+
+```{r Create-object}
+cellchat.control <- createCellChat(object = data.input.control, meta = meta.control, group.by = "annol4")
+
+cellchat.tsc <- createCellChat(object = data.input.tsc, meta = meta.tsc, group.by = "annol4")
+```
+
+# Select DB
+
+```{r Select-DB}
+CellChatDB<- CellChatDB.human
+dplyr::glimpse(CellChatDB$interaction)
+showDatabaseCategory(CellChatDB)
+CellChatDB.use <- CellChatDB
+```
+
+
+```{r Set-DB}
+cellchat.tsc@DB <- CellChatDB.use
+cellchat.control@DB <- CellChatDB.use
+```
+
+```{r}
+saveRDS(cellchat.control, "cellchat.control.rds",compress=F)
+saveRDS(cellchat.tsc, "cellchat.tsc.rds",compress=F)
+```
+
+#Calculate control
+```{r}
+cellchat <- readRDS("cellchat.control.rds")
+```
+
+# Calculate (this is run in an R session from terminal due to problems with multithreading)
+
+```{r}
+cellchat %<>% subsetData() # Subset (don't know why) and prepare further
+```
+
+```{r}
+options(future.globals.maxSize= 10000*1024^2)
+future::plan("multicore", workers = 50) # Doesn't work in RStudio
+cellchat %<>% identifyOverExpressedGenes()
+cellchat %<>% identifyOverExpressedInteractions()
+cellchat %<>% smoothData(adj = PPI.human)
+cellchat %<>% computeCommunProb()
+cellchat %<>% filterCommunication(min.cells = 10)
+cellchat %<>% computeCommunProbPathway()
+cellchat %<>% aggregateNet()
+```
+```{r}
+saveRDS(cellchat,"Cellchat/cellchat.control.calculated.rds")
+```
+#Calculate TSC
+
+```{r}
+cellchat <- readRDS("Cellchat/cellchat.tsc.rds")
+```
+
+# Calculate (this is run in an R session from terminal due to problems with multithreading)
+
+```{r}
+cellchat %<>% subsetData() # Subset (don't know why) and prepare further
+```
+
+```{r}
+options(future.globals.maxSize= 10000*1024^2)
+future::plan("multicore", workers = 50) # Doesn't work in RStudio
+cellchat %<>% identifyOverExpressedGenes()
+cellchat %<>% identifyOverExpressedInteractions()
+cellchat %<>% smoothData(adj = PPI.human)
+cellchat %<>% computeCommunProb()
+cellchat %<>% filterCommunication(min.cells = 10)
+cellchat %<>% computeCommunProbPathway()
+cellchat %<>% aggregateNet()
+```
+```{r}
+#saveRDS(cellchat,"Cellchat/cellchat.tsc.calculated.rds")
+```
+# Plotting
+
+Load object
+
+```{r}
+cellchat <- readRDS("Cellchat/cellchat.rds")
+```
+
+#Now both cellchat networks has been calculated for both conditions, we start the cellchat tutorial for multiple datasets:
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  root.dir = './'
+)
+#knitr::opts_chunk$set(eval = FALSE)
+```
+
+## Create a directory to save figures
+```{r eval = FALSE}
+data.dir <- 'Cellchat/comparison'
+dir.create(data.dir)
+setwd(data.dir)
+```
+
+# Load CellChat object of each dataset and merge them together
+Users need to first run CellChat on each dataset separately and then merge different CellChat objects together. Please do `updateCellChat` if the CellChat objects are obtained using the earlier version (< 1.6.0).
+```{r}
+cellchat.c <- readRDS("Cellchat/cellchat.control.calculated.rds")
+cellchat.TSC <- readRDS("Cellchat/cellchat.tsc.calculated.rds")
+```
+```{r}
+reticulate:::use_condaenv(conda = "/maps/projects/thor/people/vrx491/.conda/",condaenv = "/maps/projects/thor/people/vrx491/.conda/envs/r-reticulate" )
+reticulate::py_config()
+```
+
+```{r}
+cellchat.c <- netAnalysis_computeCentrality(cellchat.c, slot.name = "netP")
+cellchat.c <- computeNetSimilarity(cellchat.c, type = "functional")
+cellchat.c <- netEmbedding(cellchat.c, type = "functional")
+cellchat.c <- computeNetSimilarity(cellchat.c, type = "structural")
+cellchat.c <- netEmbedding(cellchat.c, type = "structural")
+cellchat.TSC <- netAnalysis_computeCentrality(cellchat.TSC, slot.name = "netP")
+cellchat.TSC <- computeNetSimilarity(cellchat.TSC, type = "functional")
+cellchat.TSC <- netEmbedding(cellchat.TSC, type = "functional")
+cellchat.TSC <- computeNetSimilarity(cellchat.TSC, type = "structural")
+cellchat.TSC <- netEmbedding(cellchat.TSC, type = "structural")
+```
+```{r}
+saveRDS(cellchat.c,"Cellchat/cellchat.control.calculated.rds")
+saveRDS(cellchat.TSC,"Cellchat/cellchat.tsc.calculated.rds")
+```
+
+```{r}
+object.list <- list(Control = cellchat.c, TSC = cellchat.TSC)
+cellchat <- mergeCellChat(object.list, add.names = names(object.list))
+cellchat
+execution.time = Sys.time() - ptm
+print(as.numeric(execution.time, units = "secs"))
+```
+#Change annotation order
+```{r}
+# Define the cell types in the desired order
+cell_types <- c( "L2_CUX2_LAMP5_PDGFD","L2_3_CUX2_FREM3_NTNG1", "L3_CUX2_SPOCK3_PRSS12", "L4_RORB_SCHLAP1_ARHGAP15", "L4_RORB_SCHLAP1_MET", 
+                "L4_RORB_SCHLAP1_MME", "L5_6_FEZF2_LRRK1_PCP4", "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", "L5_6_FEZF2_TLE4_HTR2C", 
+                "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", "L5_6_THEMIS_SEMA3A", "Neu_dev_THY1", "TBD", "ID2_CHRNA7_CNR1", 
+                "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6", "ID2_LAMP5_CRH", "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH",
+                "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", "VIP_TYR", "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B", "SST_CALB1", "SST_ISOC_THSD7B", "SST_NOS1",
+                "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH")
+#combined_df$celltype <- factor(combined_df$celltype, levels = cell_types)
+cellchat@idents$joint <- factor(cellchat@idents$joint, levels = cell_types)
+```
+
+
+```{r, eval = FALSE}
+# Users can now export the merged CellChat object and the list of the two separate objects for later use
+saveRDS(object.list, file = "Cellchat/comparison/cellchat_object_list.rds")
+saveRDS(cellchat, file = "Cellchat/comparison/cellchat_control_tsc.rds")
+```
+
+# Part I: Identify altered interactions and cell populations
+CellChat employs a top-down approach, i.e., starting with the big picture and then refining it in a greater detail on the signaling mechanisms, to identify signaling changes at different levels, including altered interactions, cell populations, signaling pathways and ligand-receptor pairs. First, CellChat starts with a big picture to answer the following questions: 
+
+* Whether the cell-cell communication is enhanced or not
+
+* The interaction between which cell types is significantly changed
+
+* How the major sources and targets change from one condition to another
+
+## Compare the total number of interactions and interaction strength
+To answer the question on whether the cell-cell communication is enhanced or not, CellChat compares the total number of interactions and interaction strength of the inferred cell-cell communication networks from different biological conditions.
+
+# Load cellchat objects, if you dont want to run all the models above just load from objects in folder
+```{r}
+object.list <- readRDS("comparison/cellchat_object_list.rds")
+cellchat <- readRDS("comparison/cellchat_control_tsc.rds")
+```
+
+```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+ptm = Sys.time()
+gg1 <- compareInteractions(cellchat, show.legend = F, group = c(1,2))
+gg2 <- compareInteractions(cellchat, show.legend = F, group = c(1,2), measure = "weight")
+gg1 + gg2
+```
+
+## Compare the number of interactions and interaction strength among different cell populations
+To identify the interaction between which cell populations showing significant changes, CellChat compares the number of interactions and interaction strength among different cell populations using a circle plot with differential interactions (option A), a heatmap with differential interactions (option B) and two circle plots with the number of interactions or interaction strength per dataset (option C). Alternatively, users can examine the differential number of interactions or interaction strength among coarse cell types by aggregating the cell-cell communication based on the defined cell groups (option D). 
+
+### (A) Circle plot showing differential number of interactions or interaction strength among different cell populations across two datasets
+The differential number of interactions or interaction strength in the cell-cell communication network betwe
+en two datasets can be visualized using circle plot, where $\color{red}{\text{red}}$ (or $\color{blue}{\text{blue}}$) colored edges represent $\color{red}{\text{increased}}$ (or $\color{blue}{\text{decreased}}$) signaling in the second dataset compared to the first one.
+
+```{r, fig.width=24,fig.height = 12, fig.wide = TRUE, fig.align = "center"}
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_diffInteraction(cellchat, weight.scale = T)
+netVisual_diffInteraction(cellchat, weight.scale = T, measure = "weight")
+```
+
+### (B) Heatmap showing differential number of interactions or interaction strength among different cell populations across two datasets
+CellChat can also show differential number of interactions or interaction strength in greater details using a heatmap. The top colored bar plot represents the sum of each column of the absolute values displayed in the heatmap (incoming signaling). The right colored bar plot represents the sum of each row of the absolute values (outgoing signaling). Therefore, the bar height indicates the degree of change in terms of the number of interactions or interaction strength between the two conditions. In the colorbar, $\color{red}{\text{red}}$ (or $\color{blue}{\text{blue}}$) represents $\color{red}{\text{increased}}$ (or $\color{blue}{\text{decreased}}$) signaling in the second dataset compared to the first one.
+
+### Fig. 5e + Extended Data Fig. 16
+```{r, fig.width=10,fig.height = 10, fig.wide = TRUE, fig.align = "center"}
+cells_use <- c( "L2_CUX2_LAMP5_PDGFD","L2_3_CUX2_FREM3_NTNG1", "L3_CUX2_SPOCK3_PRSS12", "L4_RORB_SCHLAP1_ARHGAP15", "L4_RORB_SCHLAP1_MET", 
+                "L4_RORB_SCHLAP1_MME", "L5_6_FEZF2_LRRK1_PCP4", "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", "L5_6_FEZF2_TLE4_HTR2C", 
+                "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", "L5_6_THEMIS_SEMA3A", "ID2_CHRNA7_CNR1", 
+                "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6", "ID2_LAMP5_CRH", "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH",
+                "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", "VIP_TYR", "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B", "SST_CALB1", "SST_ISOC_THSD7B", "SST_NOS1",
+                "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH")
+
+gg1 <- netVisual_heatmap(cellchat, row.show = cells_use, col.show = cells_use)
+gg2 <- netVisual_heatmap(cellchat, measure = "weight",row.show = cells_use, col.show = cells_use)
+
+```
+### Fig. 5e
+```{r}
+png("figures/Cellchat_number_of_interactions.png",width=11,height=10,units="in",res=1200)
+gg1
+dev.off()
+```
+### Extended Data Fig. 16
+```{r}
+png("figures/Cellchat_interaction_strength.png",width=11,height=10,units="in",res=1200)
+gg2
+dev.off()
+```
+
+```{r}
+sessionInfo()
+```
+
+

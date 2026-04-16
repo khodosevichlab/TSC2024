@@ -1,0 +1,265 @@
+---
+title: "snRNA-seq TSC2: Case-control analysis - Neurons - GWAS Workflow"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+##LIBS
+```{r setup}
+library(dplyr)
+library(magrittr)
+library(conos)
+library(pagoda2)
+library(scHelper)
+library(cacoa)
+library(ggplot2)
+library(ggrastr)
+library(cowplot)
+library(HDF5Array)
+library(Seurat)
+set.seed(1)
+```
+
+# Cellect/Cellex GWAS and snRNA-seq integration workflow
+
+## Load data
+```{r}
+annotation_n <- readRDS("../../../TSC2024_data_files/5.neurons/annotation_neurons.rds")
+con_neurons <- readRDS("../../5.neurons/con_neurons.rds")
+cm.merged.raw <- con_neurons$getJointCountMatrix(raw=T)
+```
+
+
+## Convert genenames to ENSEMBL
+```{r}
+library(org.Hs.eg.db)
+```
+
+```{r}
+gnames <- clusterProfiler::bitr(geneID = colnames(cm.merged.raw), fromType = "SYMBOL", toType = "ENSEMBL", OrgDb = org.Hs.eg.db)
+gnames %<>% .[match(unique(.$SYMBOL), .$SYMBOL),] %>% .[match(unique(.$ENSEMBL), .$ENSEMBL),]
+
+cm.merged.raw %<>% .[,match(gnames$SYMBOL, colnames(.))]
+colnames(cm.merged.raw) <- gnames$ENSEMBL
+```
+
+## Make annotation table
+
+```{r}
+cell.groups <- annotation_n$l4 %>%
+  as.character() %>%
+  setNames(names(annotation_n$l4)) %>%
+  .[match(rownames(cm.merged.raw),names(.))] %>%
+  cbind()%>% 
+  data.frame(stringsAsFactors = F) %>% 
+  tibble::rownames_to_column() %>% 
+  setNames(c("cell_id","cell_type"))
+cell.groups$cell_id %<>% gsub(".", "", ., fixed = T)
+cell.groups$cell_id %<>% gsub("!", "", ., fixed = T)
+```
+
+## Extract TSC2 cells
+
+```{r}
+sample.per.cell <- con_neurons$getDatasetPerCell()
+sample.groups = c(rep("Control",6), rep("TSC2",11)) %>% setNames(names(con_neurons$samples))
+ep.cells <- sample.per.cell[sample.per.cell %in% names(sample.groups[sample.groups == "TSC2"])] %>% factor()
+names(ep.cells) <- names(ep.cells) %>% gsub("!","", ., fixed = T)
+ep.cells %<>% factor()
+groups.ep <- cell.groups %>% .[.$cell_id %in% names(ep.cells),]
+rownames(cm.merged.raw) %<>% gsub("!", "", ., fixed = T)
+ep.cm <- cm.merged.raw %>% .[rownames(.) %in% groups.ep$cell_id,]
+dim(ep.cm); dim(groups.ep) #check if dimensions of matrix and cells are fine (only disease cells are included)
+```
+
+## Write files for cellex processing
+```{r}
+library(HDF5Array)
+library(Matrix)
+
+dir.create("CELLEX")
+writeHDF5Array(ep.cm, "CELLEX/ep.h5", "data", verbose = T)
+write.csv(ep.cm %>% colnames(), "CELLEX/genes.ep.csv", row.names = F)
+write.csv(ep.cm %>% rownames(), "CELLEX/cells.ep.csv", row.names = F)
+write.csv(groups.ep, "CELLEX/metadata.ep.csv", row.names = F)
+```
+
+## Run the python script below in conda env with cellex and prerequisites installed.
+
+```{python}
+import numpy as np
+import pandas as pd
+import cellex
+# this script was developed using pybedtools v. 0.8.0import h5py
+
+data = pd.DataFrame(np.array(h5py.File("ep.h5")['data']), dtype="float32")
+data.columns = pd.read_csv("cells.ep.csv").values
+data.columns = [v[0] for v in data.columns]
+data.index = pd.read_csv("genes.ep.csv").values
+data.index = [v[0] for v in data.index]
+
+metadata = pd.read_csv("metadata.ep.csv", index_col=0)
+
+eso = cellex.ESObject(data=data, annotation=metadata, verbose=True)
+eso.compute(verbose=True)
+
+eso.results["esmu"].to_csv("Cellex.ep.results.csv.gz")
+```
+
+## When cellex results are ready and GWAS summary stats are munged, proceed to CELLECT workflow to obtain prioritization results
+## If you decide not to run the pipeline yourself, prioritization results are in the folder under MAGMA_results
+
+##Focal Epilepsy
+###MAGMA
+
+```{r}
+cell_types <- c(
+  "L2_CUX2_LAMP5_PDGFD","L2_3_CUX2_FREM3_NTNG1", "L3_CUX2_SPOCK3_PRSS12", 
+  "L4_RORB_SCHLAP1_ARHGAP15", "L4_RORB_SCHLAP1_MET", "L4_RORB_SCHLAP1_MME", 
+  "L5_6_FEZF2_LRRK1_PCP4", "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", 
+  "L5_6_FEZF2_TLE4_HTR2C", "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", 
+  "L5_6_THEMIS_SEMA3A", "ID2_CHRNA7_CNR1", "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6",
+  "ID2_LAMP5_CRH", "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", 
+  "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH", "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", "VIP_TYR",
+  "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B",
+  "SST_CALB1", "SST_ISOC_THSD7B", "SST_NOS1", "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH"
+)
+
+dat.ld <- read.csv("MAGMA_results/prioritization_focal.csv")
+dat.ld$neg_logP <- -log10(dat.ld$pvalue)
+
+dat.ld <- dat.ld %>%
+  dplyr::mutate(type = "LD") %>%
+  dplyr::filter(annotation %in% cell_types) %>%
+  dplyr::mutate(annotation = factor(annotation, levels = cell_types))
+
+p.cutoff <- 0.05 / nrow(dat.ld)
+
+cellect <- ggplot(dat.ld, aes(annotation, pvalue, col = annotation)) + 
+  geom_point() +
+  labs(x = "", y = "P value") +
+  geom_hline(yintercept = 0.05, col = "black", linetype = "dotted") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    legend.position = "none",
+    axis.text.y = element_text(colour = ifelse(dat.ld$pvalue <= p.cutoff, "red", "black"))
+  ) +
+  coord_flip() + 
+  scale_color_manual(values = dat.ld$pvalue %>% sapply(function(x) {
+    if (x <= p.cutoff) return("red")
+    else if (x > p.cutoff & x <= 0.05) return("gray")
+    else return("black")
+  }) %>% setNames(as.character(dat.ld$annotation)))
+```
+
+
+```{r}
+cellect
+
+filename = "../figures/Cellect_GWAS_Focal_epilepsy_MAGMA.pdf"
+pdf.width = 5
+pdf.height = 6
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+# Fig 6e
+```{r}
+cellect_log <- ggplot(dat.ld, aes(annotation, neg_logP, col = annotation)) + 
+  geom_point() +
+  labs(x = "", y = "-log10(p)") +
+  geom_hline(yintercept = 1.301, col = "black", linetype = "dotted") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    legend.position = "none"
+  ) +
+  coord_flip() + 
+  scale_color_manual(values = dat.ld$neg_logP %>% sapply(function(x) {
+    if (x > -log10(p.cutoff)) return("red")
+    else if (x < -log10(p.cutoff) & x > 1.301) return("gray")
+    else return("black")
+  }) %>% setNames(as.character(dat.ld$annotation)))
+```
+
+```{r fig.height=6.5, fig.width=6, message=FALSE}
+cellect_log
+
+filename = "../figures/Cellect_GWAS_Focal_epilepsy_Logscale_MAGMA.pdf"
+pdf.width = 6
+pdf.height = 6.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+
+## Generalized
+###MAGMA
+```{r}
+  dat.ld <- read.csv("MAGMA_results/prioritization_generalized.csv")
+dat.ld$neg_logP <- -log10(dat.ld$pvalue)
+
+dat.ld <- dat.ld %>%
+  dplyr::mutate(type = "LD") %>%
+  dplyr::filter(annotation %in% cell_types) %>%
+  dplyr::mutate(annotation = factor(annotation, levels = cell_types))
+
+p.cutoff <- 0.05 / nrow(dat.ld)
+
+cellect <- ggplot(dat.ld, aes(annotation, pvalue, col = annotation)) + 
+  geom_point() +
+  labs(x = "", y = "P value") +
+  geom_hline(yintercept = 0.05, col = "black", linetype = "dotted") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    legend.position = "none",
+    axis.text.y = element_text(colour = ifelse(dat.ld$pvalue <= p.cutoff, "red", "black"))
+  ) +
+  coord_flip() + 
+  scale_color_manual(values = dat.ld$pvalue %>% sapply(function(x) {
+    if (x <= p.cutoff) return("red")
+    else if (x > p.cutoff & x <= 0.05) return("gray")
+    else return("black")
+  }) %>% setNames(as.character(dat.ld$annotation)))
+```
+
+```{r}
+cellect
+
+filename = "../figures/Cellect_GWAS_generalized_epilepsy_MAGMA.pdf"
+pdf.width = 5
+pdf.height = 6
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+cellect_log <- ggplot(dat.ld, aes(annotation, neg_logP, col = annotation)) + 
+  geom_point() +
+  labs(x = "", y = "-log10(p)") +
+  geom_hline(yintercept = 1.301, col = "black", linetype = "dotted") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    legend.position = "none"
+  ) +
+  coord_flip() + 
+  scale_color_manual(values = dat.ld$neg_logP %>% sapply(function(x) {
+    if (x > -log10(p.cutoff)) return("red")
+    else if (x < -log10(p.cutoff) & x > 1.301) return("gray")
+    else return("black")
+  }) %>% setNames(as.character(dat.ld$annotation)))
+```
+# Fig 6f
+```{r fig.height=6.5, fig.width=6, message=FALSE}
+cellect_log
+filename = "../figures/Cellect_GWAS_generalized_epilepsy_Logscale_MAGMA.pdf"
+pdf.width = 6
+pdf.height = 6.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+
+```{r}
+sessionInfo()
+```
+

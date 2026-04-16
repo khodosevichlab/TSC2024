@@ -1,0 +1,373 @@
+---
+title: "snRNA-seq TSC2: Transcription factor inference"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+```{r}
+## We load the required packages
+library(Seurat)
+library(decoupleR)
+library(OmnipathR)
+library(cacoa)
+
+# Only needed for data handling and plotting
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(patchwork)
+library(ggplot2)
+library(pheatmap)
+library(data.table)
+```
+
+
+```{r}
+dir.create("../figures")
+dir.create("../figures/inference")
+```
+
+### Get Collectri TF interactions for human
+```{r}
+net <- decoupleR::get_collectri(organism='human', split_complexes=FALSE)
+net
+```
+
+
+###Load Cacoa object and extract DE analysis results
+
+```{r}
+cao <- readRDS("../../5.neurons/cao_neurons.rds")
+```
+```{r}
+de <- cao$test.results$de
+de <- lapply(de, "[[", "res")
+```
+
+### Extract Z-scores 
+
+```{r}
+dehm <- lapply(de, function(x){ 
+    data.table(x) %>% 
+    dplyr::select(Gene, Z) %>% 
+    dplyr::filter(!is.na(Z)) %>% 
+    column_to_rownames(var = "Gene") %>%
+    as.matrix()})
+```
+
+### Perfom ULM pipeline with decoupler
+
+```{r}
+acts <- lapply(dehm, function(x) {run_ulm(x, network=net, .source='source', .target='target',
+                .mor='mor', minsize = 5)})
+```
+
+### Make genes rows and clean up
+
+```{r}
+acts_pre <- lapply(acts, function(x){
+  x %>%
+    as.data.frame() %>% 
+    set_rownames(x$source)
+})
+acts_pre <- lapply(acts_pre, "[", 4:4)
+```
+
+
+```{r}
+saveRDS(acts_pre, "tf_activities_collectri.rds", compress=F)
+```
+```{r}
+acts_pre <- readRDS("tf_activities_collectri.rds")
+```
+
+
+#Save data
+```{r}
+TF_neurons <- rbindlist(lapply(acts, function(x) x), idcol = "CellType")
+write.csv2(TF_neurons,file = "Transcription_factor_inference_neurons.csv")
+```
+
+
+###Extract top 10 +NES and -NES TFs for each cell type and make union for HM plot
+
+
+```{r}
+#Remove celltypes
+acts_pre$TBD <- NULL
+acts_pre$Neu_dev_THY1 <- NULL
+acts_top10_up <- lapply(acts_pre, function(x){
+  x%>%
+    rownames_to_column(var = "GeneID") %>%
+    dplyr::rename(NES = "score") %>%
+    dplyr::top_n(10, wt = NES) %>%
+    dplyr::arrange(NES) %>% 
+    dplyr::mutate(GeneID = factor(GeneID))})
+
+
+acts_top10_down <- lapply(acts_pre, function(x){
+  x%>%
+    rownames_to_column(var = "GeneID") %>%
+    dplyr::rename(NES = "score") %>%
+    dplyr::top_n(10, wt = -NES) %>%
+    dplyr::arrange(NES) %>% 
+    dplyr::mutate(GeneID = factor(GeneID))})
+
+top10up <- rbindlist(acts_top10_up)$GeneID %>% unique %>% as.character
+top10down <- rbindlist(acts_top10_down)$GeneID %>% unique %>% as.character
+
+m <- do.call(plyr::rbind.fill.matrix, lapply(acts_pre, t))
+rownames(m) <- names(acts_pre)
+m <- t(m)
+m <- m[c(top10up, top10down),] %>% unique
+```
+
+### Extended data fig. 21
+```{r fig.height=15 , fig.width=10}
+library(ggplot2)
+library(reshape2)
+library(scales)
+library(RColorBrewer)
+cell_types <- c("L2_CUX2_LAMP5_PDGFD","L2_3_CUX2_FREM3_NTNG1", "L3_CUX2_SPOCK3_PRSS12", 
+                "L4_RORB_SCHLAP1_ARHGAP15", "L4_RORB_SCHLAP1_MET", "L4_RORB_SCHLAP1_MME", 
+                "L5_6_FEZF2_LRRK1_PCP4", "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", 
+                "L5_6_FEZF2_TLE4_HTR2C", "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", 
+                "L5_6_THEMIS_SEMA3A", "ID2_CHRNA7_CNR1", "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6",
+                "ID2_LAMP5_CRH", "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", 
+                "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH", "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", "VIP_TYR",
+                "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B",
+                "SST_CALB1", "SST_ISOC_THSD7B", "SST_NOS1", "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH"
+                )
+genes_to_plot <- c("PLAGL1", "HOXB13", "NFIB", "SMAD4", "NR0B1", "SOX17", "STAT1", "TFCP2", "NKX2-2", "SPI1", "RFX1", "STAT4", "NEUROG1", "CRX", "CIITA", "KLF5", "NFATC2", "SRY", "E2F3", "KLF11", "EN1", "PREB", "IRF1", "NR1H2", "SNAI1", "LMO2", "KLF10", "NR1D1", "TBX2", "NR3C1", "SIM2", "ZEB2", "MZF1", "HOXA13", "HDAC7", "BCL11B", "ELF1", "THRB", "TFE3", "LMX1B", "NFIX", "SMARCA1", "HOXB7", "EGR2", "FOXA1", "SMAD3", "ZFPM1", "EP300", "ETV3", "APEX1", "HDAC9", "HDAC3", "MYCN", "IKZF1", "VDR", "RARA", "RARG", "MEF2D", "TFAP2C", "CEBPA", "IRF3", "CREB5", "ERF", "HNF1B", "WT1", "NCOR2", "YAP1", "BRCA1", "OTX2", "IRF8", "FOXA2", "HOXA10", "ESR2", "ESR1", "SMAD1", "ZNF382", "GATA5", "FOXN1", "SREBF1", "NR1H3", "TP63", "KCNIP3", "RUNX1", "IRF2", "RXRB", "SREBF2", "IRX1", "KDM5D", "ZNF331", "HTATIP2","REST","MECP2","RXRA","E2F2","DNMT3A","NR1I2","GTF2IRD1","E4F1","KDM5C")
+
+
+
+# Assuming m is your matrix
+m_rescaled <- scale(m[rowSums(ifelse(is.na(m), 1, 0)) < 10, ]) %>% rescale(to=c(-3,3))
+
+# Melt the matrix into long format for ggplot2
+m_melted <- melt(m_rescaled, varnames = c("Row", "Column"), value.name = "Value")
+
+m_melted$Column <- factor(m_melted$Column, levels = cell_types)
+
+m_melted <- subset(m_melted, Row %in% genes_to_plot)
+
+dashed_line_position <- length(grep("^L", cell_types))
+
+ggplot(m_melted, aes(x = Column, y = Row, fill = Value)) +
+  geom_tile() +
+  scale_fill_viridis(name = "NES", na.value = "gray",) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.text.y = element_text(size = 8))
+
+ggplot(m_melted, aes(x = Column, y = Row, fill = Value)) +
+  geom_tile() +
+ scale_fill_distiller(palette = "PuOr", name = "NES", na.value = "grey")+
+  theme_minimal() +
+  geom_vline(xintercept = dashed_line_position + 0.5, linetype = "dashed", color = "black") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        axis.text.y = element_text(size = 8))+
+  ylab(element_blank()) +
+  xlab(element_blank())
+
+filename = "../figures/inference/TF_Heatmap_Big.pdf"
+pdf.width = 10
+pdf.height = 15
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+```
+
+### Plot top genes
+### Fig. 6c
+```{r fig.height=5, fig.width=10, paged.print=FALSE}
+library(ggplot2)
+library(reshape2)
+library(scales)
+library(viridis)
+library(dplyr)
+library(data.table)
+library(plyr)
+
+
+cell_types <- c("L2_CUX2_LAMP5_PDGFD","L2_3_CUX2_FREM3_NTNG1", "L3_CUX2_SPOCK3_PRSS12", 
+                "L4_RORB_SCHLAP1_ARHGAP15", "L4_RORB_SCHLAP1_MET", "L4_RORB_SCHLAP1_MME", 
+                "L5_6_FEZF2_LRRK1_PCP4", "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", 
+                "L5_6_FEZF2_TLE4_HTR2C", "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", 
+                "L5_6_THEMIS_SEMA3A", "ID2_CHRNA7_CNR1", "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6",
+                "ID2_LAMP5_CRH", "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", 
+                "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH", "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", "VIP_TYR",
+                "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B",
+                "SST_CALB1", "SST_ISOC_THSD7B", "SST_NOS1", "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH"
+                )
+
+# Define the genes to plot
+downgenes <- c("MYC", "E2F4", "HIF1A", "NFKB", "CREB1", "JUN")
+upgenes <- c("REST", "DNMT3A", "E2F2", "GTF2IRD1", "NR1I2", "ZNF331","CDX2","GLI3","SOX5","CREBBP","MECP2","ERF","KDM5C")
+genes_to_plot <- c(downgenes, upgenes)
+
+# Filter the matrix for the specified genes
+m <- do.call(plyr::rbind.fill.matrix, lapply(acts_pre, t))
+rownames(m) <- names(acts_pre)
+m <- t(m)
+
+# Check which genes are present in the matrix
+present_genes <- genes_to_plot[genes_to_plot %in% rownames(m)]
+missing_genes <- genes_to_plot[!genes_to_plot %in% rownames(m)]
+
+# Print missing genes
+if (length(missing_genes) > 0) {
+  cat("The following genes are missing from the matrix:\n")
+  print(missing_genes)
+}
+
+# Proceed with the present genes
+m_filtered <- m[present_genes, , drop = FALSE]
+
+# Rescale the matrix
+m_rescaled <- scale(m_filtered[rowSums(ifelse(is.na(m_filtered), 1, 0)) < 10, ]) %>% rescale(to = c(-3, 3))
+
+# Melt the matrix into long format for ggplot2
+m_melted <- melt(m_rescaled, varnames = c("Row", "Column"), value.name = "Value")
+# Ensure the x-axis follows the desired order
+m_melted$Column <- factor(m_melted$Column, levels = cell_types)
+
+#Remove NA cell types
+m_melted<- m_melted %>% drop_na(Column)
+
+# Determine the position for the dashed line
+dashed_line_position <- length(grep("^L", cell_types))
+
+# Plot using the Viridis color scale
+ggplot(m_melted, aes(x = Column, y = Row, fill = Value)) +
+  geom_tile() +
+  scale_fill_viridis(name = "NES", na.value = "gray") +
+  theme_minimal() +
+  geom_vline(xintercept = dashed_line_position + 0.5, linetype = "dashed", color = "black") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        axis.text.y = element_text(size = 8))+
+  ylab(element_blank())+
+  xlab(element_blank())
+filename = "../figures/inference/TF_up_down_viridis.pdf"
+pdf.width = 10
+pdf.height = 5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+
+  # Plot using the PuOr color scale
+ggplot(m_melted, aes(x = Column, y = Row, fill = Value)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "PuOr", name = "NES", na.value = "gray") +
+  theme_minimal() +
+  geom_vline(xintercept = dashed_line_position + 0.5, linetype = "dashed", color = "black") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        axis.text.y = element_text(size = 8))+
+  ylab(element_blank())+
+  xlab(element_blank())
+filename = "../figures/inference/TF_up_down_PuOr.pdf"
+pdf.width = 10
+pdf.height = 5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+# Pathway activity inference from scRNA-seq
+
+```{r}
+## We load the required packages
+library(Seurat)
+library(decoupleR)
+
+# Only needed for data handling and plotting
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(patchwork)
+library(ggplot2)
+library(pheatmap)
+library(scales)
+```
+
+```{r}
+net <- get_progeny(organism = 'human', top = 500)
+net
+```
+
+```{r}
+dehm <- lapply(de, function(x){ 
+    data.table(x) %>% 
+    dplyr::select(Gene, Z) %>% 
+    dplyr::filter(!is.na(Z)) %>% 
+    column_to_rownames(var = "Gene") %>%
+    as.matrix()})
+```
+
+
+```{r}
+acts <- lapply(dehm, function(x) {run_mlm(x, net=net, .source='source', .target='target',
+                .mor='weight', minsize = 5)})
+```
+
+```{r}
+acts$TBD <- NULL
+acts$Neu_dev_THY1 <- NULL
+combined_data <- do.call(rbind, lapply(names(acts), function(cell_type) {
+  data <- acts[[cell_type]]
+  data$cell_type <- cell_type
+  return(data)
+}))
+
+p_value_to_asterisks <- function(p) {
+  if (p < 0.001) {
+    return("***")
+  } else if (p < 0.01) {
+    return("**")
+  } else if (p < 0.05) {
+    return("*")
+  } else {
+    return("")
+  }
+}
+
+combined_data <- combined_data %>%
+  mutate(asterisks = sapply(p_value, p_value_to_asterisks))
+
+combined_data$scaled_score <- scale(combined_data$score) %>% rescale(to = c(-3, 3))
+names(combined_data)
+```
+## Pathway activity inference plot
+### Fig. 6d
+
+```{r}
+cell_types <- c("L2_CUX2_LAMP5_PDGFD","L2_3_CUX2_FREM3_NTNG1", "L3_CUX2_SPOCK3_PRSS12", 
+                "L4_RORB_SCHLAP1_ARHGAP15", "L4_RORB_SCHLAP1_MET", "L4_RORB_SCHLAP1_MME", 
+                "L5_6_FEZF2_LRRK1_PCP4", "L5_6_FEZF2_LRRK1_SEMA3E", "L5_6_FEZF2_TLE4_ABO", 
+                "L5_6_FEZF2_TLE4_HTR2C", "L5_6_FEZF2_TLE4_SCUBE1", "L5_6_THEMIS_NR4A2_NTNG2", 
+                "L5_6_THEMIS_SEMA3A", "ID2_CHRNA7_CNR1", "ID2_CHRNA7_NCKAP5", "ID2_CHRNA7_PAX6",
+                "ID2_LAMP5_CRH", "ID2_LAMP5_MEIS2", "ID2_LAMP5_NMBR", "ID2_LAMP5_NOS1", 
+                "VIP_ABI3BP", "VIP_CBLN1", "VIP_CRH", "VIP_NRG1", "VIP_SEMA3C", "VIP_TRPM3_SSTR1", "VIP_TYR",
+                "PVALB_BTBD11", "PVALB_LGR5", "PVALB_MEPE", "PVALB_UNC5B",
+                "SST_CALB1", "SST_ISOC_THSD7B", "SST_NOS1", "SST_NPY", "SST_STK32A", "SST_TAC3", "SST_TH"
+                )
+
+combined_data$cell_type <- factor(combined_data$cell_type, levels = cell_types)
+ggplot(combined_data, aes(x = cell_type, y = source, fill = scaled_score)) +
+  geom_tile() +
+  geom_text(aes(label = asterisks), color = "white", size = 3) +
+  scale_fill_distiller(palette = "PuOr", name = "NES", na.value = "gray") +
+  theme_minimal() +
+  geom_vline(xintercept = dashed_line_position + 0.5, linetype = "dashed", color = "black") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        axis.text.y = element_text(size = 8))+
+  ylab(element_blank())+
+  xlab(element_blank())
+filename = "../figures/inference/Pathway_activity_inference_PuOr.pdf"
+pdf.width = 10
+pdf.height = 5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+sessionInfo()
+```
+
+

@@ -1,0 +1,51 @@
+2024/10/07 10:41:32 AM *********************************************************************
+* LD Score Regression (LDSC)
+* Version 1.0.0
+* (C) 2014-2015 Brendan Bulik-Sullivan and Hilary Finucane
+* Broad Institute of MIT and Harvard / MIT Department of Mathematics
+* GNU General Public License v3
+*********************************************************************
+Call: 
+./munge_sumstats.py \
+--out /maps/projects/thor/data/Epilepsy-TSC2/5cacoa/Neurons_3.0/CELLEX/GWAS_2023/munged/generalized_ep_munged \
+--merge-alleles data/ldsc/w_hm3.snplist \
+--n-value 766345 \
+--sumstats /maps/projects/thor/data/Epilepsy-TSC2/5cacoa/Neurons_3.0/CELLEX/GWAS_2023/ILAE3_TRANS_GGE_final.tbl \
+--p PVAL 
+
+2024/10/07 10:41:32 AM Interpreting column names as follows:
+2024/10/07 10:41:32 AM MarkerName:	Variant ID (e.g., rs number)
+P-value:	p-Value
+Allele2:	a2, interpreted as non-ref allele for signed sumstat.
+Allele1:	a1, interpreted as ref allele for signed sumstat.
+Beta:	[linear/logistic] regression coefficient (0 --> no effect; above 0 --> A1 is trait/risk increasing)
+SE:	Standard errors of BETA coefficients
+
+2024/10/07 10:41:32 AM Reading list of SNPs for allele merge from data/ldsc/w_hm3.snplist
+2024/10/07 10:41:33 AM Read 1217311 SNPs for allele merge.
+2024/10/07 10:41:43 AM Reading sumstats from /maps/projects/thor/data/Epilepsy-TSC2/5cacoa/Neurons_3.0/CELLEX/GWAS_2023/ILAE3_TRANS_GGE_final.tbl into memory 5000000 SNPs at a time.
+2024/10/07 10:42:07 AM Read 4866065 SNPs from --sumstats file.
+Removed 3957396 SNPs not in --merge-alleles.
+Removed 5183 SNPs with missing values.
+Removed 0 SNPs with INFO <= 0.9.
+Removed 0 SNPs with MAF <= 0.01.
+Removed 0 SNPs with SE <0 or NaN values.
+Removed 0 SNPs with out-of-bounds p-values.
+Removed 2 variants that were not SNPs or were strand-ambiguous.
+903484 SNPs remain.
+2024/10/07 10:42:07 AM Adding uniform sample size 766345 to summary statistics.
+2024/10/07 10:42:07 AM Removed 0 SNPs with duplicated rs numbers (903484 SNPs remain).
+2024/10/07 10:42:07 AM Removed 0 SNPs with N < 510896.666667 (903484 SNPs remain).
+2024/10/07 10:42:15 AM Median value of Beta was -1.83244e-05, which seems sensible.
+2024/10/07 10:42:17 AM Removed 2 SNPs whose alleles did not match --merge-alleles (903482 SNPs remain).
+2024/10/07 10:42:17 AM Writing summary statistics for 903482 SNPs (903482 with nonmissing N) to /maps/projects/thor/data/Epilepsy-TSC2/5cacoa/Neurons_3.0/CELLEX/GWAS_2023/munged/generalized_ep_munged.sumstats.gz.
+2024/10/07 10:42:24 AM Dropping snps with null values
+2024/10/07 10:42:24 AM 
+Metadata:
+2024/10/07 10:42:25 AM Mean chi^2 = 1.342
+2024/10/07 10:42:25 AM Lambda GC = 1.285
+2024/10/07 10:42:25 AM Max chi^2 = 82.353
+2024/10/07 10:42:25 AM 251 Genome-wide significant SNPs (some may have been removed by filtering).
+2024/10/07 10:42:25 AM 
+Conversion finished at Mon Oct  7 10:42:25 2024
+2024/10/07 10:42:25 AM Total time elapsed: 52.79s

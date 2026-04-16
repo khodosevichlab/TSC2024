@@ -1,0 +1,388 @@
+---
+title: "scGenotyping all cells"
+output: html_notebook
+---
+
+## Libs
+```{r}
+library(dplyr)
+library(magrittr)
+library(readr)
+library(pagoda2)
+library(conos)
+library(cacoa)
+library(ggplot2)
+library(ggrastr)
+library(cowplot)
+library(scHelper)
+
+set.seed(1)
+```
+```{r}
+# Check if 'figure' folder exists, if not, create it
+if (!dir.exists("figures")) {
+  dir.create("figures")
+  cat("Created 'figures' folder\n")
+} else {
+  cat("'figures' folder already exists\n")
+}
+
+```
+
+## Load in data
+### count matrix neurons and cells identified via pac-bio seq
+```{r eval=FALSE, include=FALSE}
+con <- readRDS("../../3.all_cells/con_all.rds")
+cms <- lapply(names(con$samples), function(x) con$samples[[x]]$counts %>% t()) %>% setNames(names(con$samples))
+```
+
+```{r}
+map <- read_tsv("indices_sample_identifier.tsv")
+#pseudo_to_real <- setNames(map$Sample, map$`Sample Id`)
+pseudo_to_real <- setNames(map$Sample,tolower(map$`Sample Id`))
+```
+
+## Files with cell barcodes
+```{r}
+# --- Read CBcount files -------------------------------------------------------
+cb_files <- list.files(path = "../../../TSC2024_data_files/5.neurons/scgenotype/MN1016/results/",
+  pattern = "^tsc-[0-9]+\\.chr.*\\.CBcount\\.txt$",
+  full.names = TRUE
+)
+
+cb_list <- lapply(cb_files, function(f) {
+  read.table(f, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+})
+names(cb_list) <- sub("\\.chr.*", "", basename(cb_files))
+```
+
+```{r}
+subset_by_cb <- function(mat, cb_df, real_sample) {
+  cn <- colnames(mat)
+
+  # 1) Keep only columns from the correct real sample
+  sample_ok <- startsWith(cn, paste0(real_sample, "!!"))
+
+  # 2) Extract the "cellbarcode" part (after second !!)
+  cell_bc <- vapply(
+    strsplit(cn, "!!", fixed = TRUE),
+    `[`,
+    character(1),
+    3
+  )
+
+  # 3) Remove numeric suffixes after dash, e.g. "-1"
+  cell_bc <- sub("-\\d+$", "", cell_bc)
+
+  # 4) Keep only columns present in CBcount
+  keep <- sample_ok & cell_bc %in% cb_df$CellBarcode
+
+  mat[, keep, drop = FALSE]
+}
+
+```
+
+```{r}
+cms_subset <- lapply(names(cb_list), function(tsc) {
+  real_sample <- pseudo_to_real[[tsc]]
+
+  # skip if mapping or matrix is missing
+  if (is.na(real_sample) || !real_sample %in% names(cms)) {
+    return(NULL)
+  }
+
+  subset_by_cb(
+    mat = cms[[real_sample]],
+    cb_df = cb_list[[tsc]],
+    real_sample = real_sample
+  )
+})
+
+names(cms_subset) <- names(cb_list)
+cms_subset <- cms_subset[!vapply(cms_subset, is.null, logical(1))]
+
+```
+
+### Now all genotyped cells are extracted, we filter for 0 wt reads along with 2 or 3 or 4 and above mutant reads. 
+
+```{r}
+subset_homozygous_mut <- function(mat, cb_df, real_sample, min_mut_reads = 4) {
+  cn <- colnames(mat)
+
+  # 1) Keep only columns from the correct real sample
+  sample_ok <- startsWith(cn, paste0(real_sample, "!!"))
+
+  # 2) Extract the "cellbarcode" part (after second !!) and strip numeric suffix
+  cell_bc <- vapply(strsplit(cn, "!!", fixed = TRUE), `[`, 3, FUN.VALUE = character(1))
+  cell_bc <- sub("-\\d+$", "", cell_bc)
+
+  # 3) Subset cb_df to only matching barcodes
+  cb_df_sub <- cb_df[cb_df$CellBarcode %in% cell_bc, , drop = FALSE]
+
+  # 4) Determine which barcodes meet homozygous criteria
+  hom_mut_bc <- cb_df_sub$CellBarcode[cb_df_sub$WT == 0 & cb_df_sub$Mut >= min_mut_reads]
+
+  # 5) Keep only columns whose cleaned barcode is in hom_mut_bc
+  keep <- sample_ok & cell_bc %in% hom_mut_bc
+
+  mat[, keep, drop = FALSE]
+}
+
+```
+
+```{r}
+# Example for min_mut_reads = 4
+cms_hommut <- lapply(names(cb_list), function(tsc) {
+  real_sample <- pseudo_to_real[[tsc]]
+  if (is.na(real_sample) || !real_sample %in% names(cms)) return(NULL)
+
+  subset_homozygous_mut(
+    mat = cms[[real_sample]],
+    cb_df = cb_list[[tsc]],
+    real_sample = real_sample,
+    min_mut_reads = 2
+  )
+})
+
+names(cms_hommut) <- names(cb_list)
+cms_hommut <- cms_hommut[!vapply(cms_hommut, is.null, logical(1))]
+
+```
+
+```{r}
+sapply(cms_hommut, ncol)
+```
+
+```{r}
+# Number of CBcount-matching cells per sample
+cbcount_cells <- sapply(names(cb_list), function(tsc) {
+  real_sample <- pseudo_to_real[[tsc]]
+  if (is.na(real_sample) || !real_sample %in% names(cms)) return(0)
+  ncol(subset_by_cb(cms[[real_sample]], cb_list[[tsc]], real_sample))
+})
+
+cbcount_cells
+
+```
+```{r}
+thresholds <- 2:4
+prob_mut <- 1- (1/2)^thresholds
+hommut_counts <- lapply(thresholds, function(thr) {
+  sapply(names(cb_list), function(tsc) {
+    real_sample <- pseudo_to_real[[tsc]]
+    if (is.na(real_sample) || !real_sample %in% names(cms)) return(0)
+    ncol(subset_homozygous_mut(
+      cms[[real_sample]],
+      cb_list[[tsc]],
+      real_sample,
+      min_mut_reads = thr
+    ))
+  })
+})
+
+names(hommut_counts) <- paste0("Mut>=", thresholds," (",round(100*prob_mut, 1),"%)")
+hommut_counts
+
+```
+```{r}
+# Convert list to data.frame
+hommut_df <- do.call(rbind, hommut_counts)
+colnames(hommut_df) <- names(cb_list)
+hommut_df <- as.data.frame(hommut_df)
+hommut_df$Threshold <- paste0("Mut>=", thresholds)
+
+# Add total CBcount-matching cells
+cbcount_row <- c(cbcount_cells, Threshold="Total CBcount")
+hommut_df <- rbind(hommut_df, cbcount_row)
+
+# Reorder columns: Threshold first
+hommut_df <- hommut_df[, c("Threshold", names(cb_list))]
+
+hommut_df
+
+```
+```{r}
+# --- Homozygous mutant counts (rows = thresholds, cols = samples) ------------
+hommut_mat <- do.call(rbind, hommut_counts)
+colnames(hommut_mat) <- names(cb_list)
+
+# Probability labels
+prob_mut <- 1 - (1/2)^thresholds
+threshold_labels <- paste0(
+  "Mut>=", thresholds,
+  " (", round(100 * prob_mut, 1), "%)"
+)
+
+percent_df <- hommut_mat
+for (s in colnames(percent_df)) {
+  percent_df[, s] <- paste0(
+    hommut_mat[, s],
+    " (",
+    round(100 * hommut_mat[, s] / cbcount_cells[s], 1),
+    "%)"
+  )
+}
+
+percent_df <- as.data.frame(percent_df)
+
+percent_df$Threshold <- threshold_labels
+percent_df <- percent_df[, c("Threshold", colnames(percent_df))]
+
+percent_df <- rbind(
+  percent_df,
+  c("Total CBcount", as.character(cbcount_cells[colnames(hommut_mat)]))
+)
+percent_df$Threshold.1 <- NULL
+rownames(percent_df)[nrow(percent_df)] <- ""
+
+percent_df
+
+
+
+```
+
+```{r}
+# Total CBcount cells across all samples
+total_cb <- sum(cbcount_cells)
+
+# Build summary table
+total_mut_df <- data.frame(
+  Threshold = paste0(
+    "Mut>=", thresholds,
+    " (", round((1 - (1/2)^thresholds) * 100, 1), "%)"
+  ),
+  Mutated_Cells = sapply(hommut_counts, sum),
+  Total_CBcount = total_cb
+)
+
+# Add percentage
+total_mut_df$Percent_Mutated <- round(
+  100 * total_mut_df$Mutated_Cells / total_mut_df$Total_CBcount,
+  2
+)
+
+total_mut_df
+
+```
+
+### Plot onto UMAP
+
+```{r}
+all_cells <- unlist(lapply(cms, colnames), use.names = FALSE)
+cell_class <- setNames(rep("unclassified", length(all_cells)), all_cells)
+```
+
+```{r}
+for (tsc in names(cb_list)) {
+
+  real_sample <- pseudo_to_real[[tsc]]
+  if (is.na(real_sample) || !real_sample %in% names(cms)) next
+
+  mat <- cms[[real_sample]]
+  cn  <- colnames(mat)
+
+  # Extract clean barcodes
+  cell_bc <- vapply(strsplit(cn, "!!", fixed = TRUE), `[`, 3, FUN.VALUE = character(1))
+  cell_bc_clean <- sub("-\\d+$", "", cell_bc)
+
+  cb_df <- cb_list[[tsc]]
+
+  # Match CBcount rows to matrix columns
+  idx <- match(cell_bc_clean, cb_df$CellBarcode)
+  valid <- !is.na(idx)
+
+  # Subset CBcount rows aligned to columns
+  cb_sub <- cb_df[idx[valid], ]
+  col_sub <- cn[valid]
+
+  # --- Classification rules --------------------------------------------------
+
+  # Het: WT > 0
+  cell_class[col_sub[cb_sub$WT > 0]] <- "Heterozygous"
+
+  # Mut thresholds (overwrite progressively)
+  cell_class[col_sub[cb_sub$WT == 0 & cb_sub$Mut >= 2]] <- "Mut>=2 (75%)"
+  cell_class[col_sub[cb_sub$WT == 0 & cb_sub$Mut >= 3]] <- "Mut>=3 (87.5%)"
+  cell_class[col_sub[cb_sub$WT == 0 & cb_sub$Mut >= 4]] <- "Mut>=4 (93.8%)"
+}
+
+```
+```{r}
+cell_class <- factor(
+  cell_class,
+  levels = c(
+    "unclassified",
+    "Heterozygous",
+    "Mut>=2 (75%)",
+    "Mut>=3 (87.5%)",
+    "Mut>=4 (93.8%)"
+  )
+)
+
+```
+```{r}
+table(cell_class)
+
+# How many CBcount cells classified?
+sum(cell_class != "unclassified")
+
+# Check a few names
+head(names(cell_class))
+
+```
+## Load cacoa object
+
+
+```{r}
+size = 0.1
+alpha = 0.2
+
+cao <- readRDS("../../3.all_cells/cao_control_tsc_all.rds")
+bs <- if (length(levels(cao$cell.groups)) > 20) 10 else 16
+cao$plot.theme <- theme_bw(base_size = bs) + 
+  theme(plot.title=element_text(hjust = 0.5), 
+        legend.background=element_rect(fill=alpha("white", 0.2)),
+        legend.text=element_text(size=12), 
+        legend.margin=margin(6, 6, 4, 1, 'pt'),
+        plot.margin=margin())
+
+
+cao$cell.groups.palette <- levels(cao$cell.groups) %>% 
+  {setNames(sample(brewerPalette("Paired")(length(.))), .)}
+
+cao.gt <- readRDS("../../3.all_cells/cao_control_tsc_all.rds")
+cao.gt$plot.theme <- theme_bw(base_size = bs) + 
+  theme(plot.title=element_text(hjust = 0.5), 
+        legend.background=element_rect(fill=alpha("white", 0.2)),
+        legend.text=element_text(size=12), 
+        legend.margin=margin(6, 6, 4, 1, 'pt'),
+        plot.margin=margin())
+
+cell_class %<>% droplevels("unclassified")
+cao.gt$cell.groups <- cell_class
+cao.gt$cell.groups.palette <- levels(cao.gt$cell.groups) %>% 
+  {setNames(sample(brewerPalette("Paired")(length(.))), .)}
+
+cao.gt$cell.groups.palette[1] <- "lightblue"
+cao.gt$cell.groups.palette[2] <- "orange"
+cao.gt$cell.groups.palette[3] <- "purple"
+cao.gt$cell.groups.palette[4] <- "red"
+
+```
+# Fig. 6a,b
+```{r fig.height=8, fig.width=16}
+pdf(file = "figures/annotation_genotype_all_cells.pdf", height = 8, width = 16)
+plot_grid(
+  cao$plotEmbedding(color.by='cell.groups', alpha=alpha, size=size, title='Cell type', 
+                    plot.na=FALSE, show.legend=FALSE, font.size=c(2.5,3)) %>% rasterise(dpi=600) + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(), panel.border = element_blank()),
+  cao.gt$plotEmbedding(color.by='cell.groups', alpha=0.8, size=0.8, title='Genotype', plot.na=FALSE,mark.groups=FALSE) + 
+    theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(), panel.border = element_blank(),legend.position=c(0.90, 0.10)) + 
+    guides(color=guide_legend(override.aes = list(size=5,alpha=1),title=''))
+) + theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+dev.off()
+```
+
+```{r}
+sessionInfo()
+```
+

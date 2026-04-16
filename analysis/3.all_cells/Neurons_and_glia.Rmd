@@ -1,0 +1,562 @@
+---
+title: "snRNA-seq TSC2: Case-control analysis - All Cells"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+##LIBS
+```{r include=FALSE}
+library(dplyr)
+library(magrittr)
+library(conos)
+library(pagoda2)
+library(cacoa)
+set.seed(1)
+library(ggplot2)
+library(ggrastr)
+library(cowplot)
+library(HDF5Array)
+library(Seurat)
+library(SeuratObject)
+library(scHelper)
+set.seed(1)
+```
+
+```{r message=FALSE, include=FALSE}
+# Check if 'data' folder exists, if not, create it
+if (!dir.exists("data")) {
+  dir.create("data")
+  cat("Created 'data' folder\n")
+} else {
+  cat("'data' folder already exists\n")
+}
+
+# Check if 'figure' folder exists, if not, create it
+if (!dir.exists("figures")) {
+  dir.create("figures")
+  cat("Created 'figures' folder\n")
+} else {
+  cat("'figures' folder already exists\n")
+}
+
+```
+
+```{r}
+cms<- readRDS("../../TSC2024_data_files/3.all_cells/cms_final_filter.rds")
+annotation_all <- readRDS("../../TSC2024_data_files/3.all_cells/annotation_all_2024.rds")
+```
+
+```{r eval=FALSE, include=FALSE}
+con_all<- quickConos(cms,
+                  names(cms), 
+                  make.geneknn = F,
+                  n.odgenes = 3e3,
+                  nPcs = 100,
+                  min.cells.per.gene = 0, 
+                  min.transcripts.per.cell = 0, 
+                  ncomps = 40,
+                  get.tsne = F,
+                  n.cores.p2=100,
+                  n.cores.con=100)
+con_all <- con_all$con
+
+saveRDS(object = con_all, file = "data/con_all.rds", compress = F)
+```
+```{r}
+con_all <- readRDS("data/con_all.rds")
+```
+
+
+
+# Seurat figures
+
+```{r}
+#Load Seurat object
+seurat <- readRDS("../../TSC2024_data_files/3.all_cells/seurat.rds")
+```
+```{r}
+seurat$Annotation <- renameAnnotation(seurat$Annotation,"Endothelial cells","Vasculature and Immune Cells")
+seurat$Annotation <- renameAnnotation(seurat$Annotation,"Immune cells","Vasculature and Immune Cells")
+seurat$Annotation <- renameAnnotation(seurat$Annotation,"Pericytes","Vasculature and Immune Cells")
+```
+
+```{r}
+seurat$Annotation <- factor(seurat$Annotation, levels = c("Astrocytes","OPCs","diff","Oligodendrocytes","Microglia","Vasculature and Immune Cells","L2_CUX2","L2_3_CUX2","L4_RORB","L5_6","ID2","VIP","PVALB","SST","Neu_dev_THY1","TBD"))
+```
+
+```{r fig.height=6, fig.width=10}
+heatmap_markers <- c("AQP4","VCAN","MOG","CSF1R","CLDN5","RBFOX3","SLC17A7","CUX2","RORB","FEZF2","THEMIS","GAD1","ID2","VIP","PVALB","SST")
+```
+## Heatmap by condition
+### Fig 1d
+
+```{r}
+library(rlang)
+library(grid)
+  
+DoMultiBarHeatmap <- function(
+  object,
+  features = NULL,
+  cells = NULL,
+  group.by = "ident",
+  additional.group.by = NULL,
+  additional.group.sort.by = NULL,
+  cols.use = NULL,
+  group.bar = TRUE,
+  disp.min = -2.5,
+  disp.max = NULL,
+  slot = "scale.data",
+  assay = NULL,
+  label = TRUE,
+  size = 5.5,
+  hjust = 0,
+  angle = 45,
+  raster = TRUE,
+  draw.lines = TRUE,
+  lines.width = NULL,
+  group.bar.height = 0.02,
+  combine = TRUE
+) {
+  cells <- cells %||% colnames(x = object)
+  if (is.numeric(x = cells)) {
+    cells <- colnames(x = object)[cells]
+  }
+
+  assay <- assay %||% DefaultAssay(object = object)
+  DefaultAssay(object = object) <- assay
+  features <- features %||% VariableFeatures(object = object)
+  features <- rev(x = unique(x = features))
+  disp.max <- disp.max %||% ifelse(test = slot == "scale.data", yes = 2.5, no = 6)
+
+  possible.features <- rownames(
+    x = GetAssayData(object = object, assay = assay, layer = slot)
+  )
+
+  if (any(!features %in% possible.features)) {
+    bad.features <- features[!features %in% possible.features]
+    features <- features[features %in% possible.features]
+    if (length(x = features) == 0) {
+      stop("No requested features found in the ", slot, " layer for the ", assay, " assay.")
+    }
+    warning(
+      "The following features were omitted as they were not found in the ",
+      slot, " layer for the ", assay, " assay: ",
+      paste(bad.features, collapse = ", ")
+    )
+  }
+
+  data <- as.data.frame(
+    x = as.matrix(
+      x = t(
+        x = GetAssayData(object = object, assay = assay, layer = slot)[features, cells, drop = FALSE]
+      )
+    )
+  )
+
+  object <- suppressMessages(expr = StashIdent(object = object, save.name = "ident"))
+  group.by <- group.by %||% "ident"
+  groups.use <- object[[c(group.by, additional.group.by[!additional.group.by %in% group.by])]][cells, , drop = FALSE]
+
+  plots <- list()
+  for (i in group.by) {
+    data.group <- data
+
+    if (!is_null(additional.group.by)) {
+      additional.group.use <- additional.group.by[additional.group.by != i]
+      if (!is_null(additional.group.sort.by)) {
+        additional.sort.use <- additional.group.sort.by[additional.group.sort.by != i]
+      } else {
+        additional.sort.use <- NULL
+      }
+    } else {
+      additional.group.use <- NULL
+      additional.sort.use <- NULL
+    }
+
+    group.use <- groups.use[, c(i, additional.group.use), drop = FALSE]
+
+    for (colname in colnames(group.use)) {
+      if (!is.factor(x = group.use[[colname]])) {
+        group.use[[colname]] <- factor(x = group.use[[colname]])
+      }
+    }
+
+    if (draw.lines) {
+      lines.width <- lines.width %||% ceiling(x = nrow(x = data.group) * 0.0025)
+      placeholder.cells <- sapply(
+        X = 1:(length(x = levels(x = group.use[[i]])) * lines.width),
+        FUN = function(x) Seurat:::RandomName(length = 20)
+      )
+      placeholder.groups <- data.frame(rep(x = levels(x = group.use[[i]]), times = lines.width))
+      group.levels <- list()
+      group.levels[[i]] <- levels(x = group.use[[i]])
+
+      for (j in additional.group.use) {
+        group.levels[[j]] <- levels(x = group.use[[j]])
+        placeholder.groups[[j]] <- NA
+      }
+
+      colnames(placeholder.groups) <- colnames(group.use)
+      rownames(placeholder.groups) <- placeholder.cells
+
+      group.use <- sapply(group.use, as.vector)
+      rownames(x = group.use) <- cells
+      group.use <- rbind(group.use, placeholder.groups)
+
+      for (j in names(group.levels)) {
+        group.use[[j]] <- factor(x = group.use[[j]], levels = group.levels[[j]])
+      }
+
+      na.data.group <- matrix(
+        data = NA,
+        nrow = length(x = placeholder.cells),
+        ncol = ncol(x = data.group),
+        dimnames = list(placeholder.cells, colnames(x = data.group))
+      )
+      data.group <- rbind(data.group, na.data.group)
+    }
+
+    order_expr <- paste0("order(", paste(c(i, additional.sort.use), collapse = ","), ")")
+    group.use <- with(group.use, group.use[eval(parse(text = order_expr)), , drop = FALSE])
+
+    plot <- Seurat:::SingleRasterMap(
+      data = data.group,
+      raster = raster,
+      disp.min = disp.min,
+      disp.max = disp.max,
+      feature.order = features,
+      cell.order = rownames(x = group.use),
+      group.by = group.use[[i]]
+    )
+
+    plot <- plot + theme(line = element_blank())
+    plots[[i]] <- plot
+  }
+
+  if (combine) {
+    plots <- CombinePlots(plots = plots)
+  }
+  return(plots)
+}
+```
+
+
+```{r fig.height=8, fig.width=9}
+p <- DoMultiBarHeatmap(object = subset(seurat, downsample = 10000),
+                       assay = "RNA",
+                       features = heatmap_markers,
+                       group.by = "Annotation",
+                       additional.group.by = "Condition",
+                       size=3,
+                       draw.lines = T,
+                       lines.width = 3) + 
+  scale_fill_viridis_c(name = "Expression", option = "D" ) + 
+  guides(color="none")
+p
+
+ggsave(filename = "figures/heatmap_all_cells_annotation_condition_downsample_10000_cells.pdf",plot = p, width = 9,height = 8, dpi = 600,units = "in")
+```
+
+# Seurat UMAP plots
+## Age UMAP
+### Fig 1f
+```{r fig.height=10, fig.width=10}
+age_order <- c("")#Redacted due to possible patient ID
+pdf(file = "figures/age_umap_seurat.pdf", height = 10, width = 10)
+age_plot <- DimPlot(object = seurat,group.by = "Age",raster = F,pt.size = 0.05,alpha = 0.3,order = age_order,shuffle = T) + 
+theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.line=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank())+ ggtitle(NULL)
+age_plot %>% rasterize(dpi=900)
+dev.off()
+```
+## Onset/duration UMAP
+```{r fig.height=10, fig.width=10}
+dur_order <- c("NA","0.54","0.75","1","2","3","5","8","13","17")
+pdf(file = "figures/duration_umap_seurat.pdf", height = 10, width = 10)
+dur_plot <- DimPlot(object = seurat,group.by = "Duration epilepsy",raster = F,pt.size = 0.05,alpha = 0.3,order = dur_order,shuffle = T,) + 
+theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.line=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank())+ ggtitle(NULL)
+dur_plot %>% rasterize(dpi=900)
+dev.off()
+```
+## Seizure frequency UMAP
+### Fig 1g 
+```{r fig.height=10, fig.width=10}
+freq_order <- c("NA","22","91","121","122","150","200","300","304") 
+pdf(file = "figures/seizure_freq_umap_seurat.pdf", height = 10, width = 10)
+freq_plot <- DimPlot(object = seurat,group.by = "Seizure frequency",raster = F,pt.size = 0.05,alpha = 0.3,order = freq_order,shuffle = T,) + 
+theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.line=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank())+ ggtitle(NULL)
+freq_plot %>% rasterize(dpi=900)
+dev.off()
+```
+## Sex UMAP
+### Fig 1e
+```{r fig.height=10, fig.width=10}
+
+pdf(file = "figures/sex_umap_seurat.pdf", height = 10, width = 10)
+sex_plot <- DimPlot(object = seurat,group.by = "Sex",raster = F,pt.size = 0.05,alpha = 0.3,shuffle = T,) + 
+theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.line=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank())+ ggtitle(NULL)
+sex_plot %>% rasterize(dpi=900)
+dev.off()
+```
+## Condition UMAP
+```{r fig.height=10, fig.width=10}
+pdf(file = "figures/condition_umap_seurat.pdf", height = 10, width = 10)
+con_plot <- DimPlot(object = seurat,group.by = "Condition",raster = F,pt.size = 0.05,alpha = 0.3,shuffle = T,) + 
+theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.line=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank())+ ggtitle(NULL)
+con_plot %>% rasterize(dpi=900)
+dev.off()
+```
+
+
+# Cacoa Control vs lesion
+```{r}
+cao <- Cacoa$new(data.object = con_all, sample.groups = c(rep("Control",6), rep("TSC2",11)) %>% setNames(names(con_all$samples)), cell.groups = annotation_all$l3, ref.level = "Control", target.level = "TSC2", n.cores = 100)
+```
+```{r}
+saveRDS(cao, "data/cao_control_tsc_all.rds", compress=F)
+```
+
+```{r}
+bs <- if (length(levels(cao$cell.groups)) > 20) 10 else 16
+cao$plot.theme <- theme_bw(base_size = bs) + 
+  theme(plot.title=element_text(hjust = 0.5), 
+        legend.background=element_rect(fill=alpha("white", 0.2)),
+        legend.text=element_text(size=12), 
+        legend.margin=margin(6, 6, 4, 1, 'pt'),
+        plot.margin=margin())
+
+
+cao$cell.groups.palette <- levels(cao$cell.groups) %>% 
+  {setNames(sample(brewerPalette("Paired")(length(.))), .)}
+
+cao$sample.groups.palette <- c("#d73027", "#4575b4") %>% 
+  setNames(c(cao$target.level, cao$ref.level))
+```
+
+
+```{r}
+# sorted cell type names, with the largest cell types first
+
+example.celltypes <- names(sort(table(cao$cell.groups),decreasing=T))
+top1 <- example.celltypes[c(1,4)]
+top2 <- example.celltypes[19]
+ 
+cells.to.contour <- top2
+cell.to.go <- example.celltypes[19]
+
+alpha <- 0.; size <- 0.1;
+```
+
+## Fig 1c
+```{r fig.height=8, fig.width=8}
+cao$plotEmbedding(color.by='sample',
+                  alpha=alpha,
+                  size=size,
+                  title='Annotation',
+                  plot.na=FALSE,
+                  show.legend=FALSE,
+                  font.size=c(2.5,3)) %>% rasterise(dpi=900) + theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+
+```
+
+
+# Covariate analysis
+```{r}
+sample_meta <- read.csv2("../../TSC2024_data_files/3.all_cells/metadata_feb_2024.csv",sep = ";",dec = ".",)
+rownames(sample_meta) <- sample_meta$sample
+colnames(sample_meta) <- c("Sample","Alternative Sample Name","Condition","Flowcell","Sex","RIN","PMI","Age","10x Step 1","10x Step 2", "10x Step 3","Duration Epilepsy","Seizure frequency")
+head(as.data.frame(sample_meta), 17)
+```
+## As metadatasepration is based on CoDA and expressionshifts, we calculate the prerequisites:
+```{r}
+cao$estimateExpressionShiftMagnitudes()
+cao$estimateMetadataSeparation(sample.meta=sample_meta)
+```
+
+```{r}
+sort(cao$test.results$metadata.separation$pvalues)
+```
+
+```{r fig.height=4, fig.width=7.5}
+p_ex <- cao$plotSampleDistances(space="expression", legend.position=c(0,1), title= c("Expression")) 
+p_coda <-cao$plotSampleDistances(space="coda", legend.position=c(0,1), title= c("CoDA"))
+```
+
+### Fig 2a + Extended Data Figure 6a
+```{r fig.height=4, fig.width=7.5}
+plot_grid(p_ex,p_coda, ncol = 2) + theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+
+filename = "figures/MDS_basic.pdf"
+pdf.width = 8
+pdf.height = 4.3
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+### Extended Data Figure 6b
+```{r}
+p_sex_e<- cao$plotSampleDistances(space="expression", legend.position=c(0,1), sample.colors = sample_meta$Sex, color.title = "Sex")
+p_sex_e$data <- p_sex_e$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_sex_e$data$color <- sample_meta$Sex
+p_sex_c<- cao$plotSampleDistances(space="coda", legend.position=c(0,1), sample.colors = sample_meta$Sex, color.title = "Sex")
+p_sex_c$data <- p_sex_c$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_sex_c$data$color <- sample_meta$Sex
+```
+
+```{r}
+plot_grid(p_sex_e, p_sex_c)+ theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+filename = "figures/MDS_sex.pdf"
+pdf.width = 8
+pdf.height = 4
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+### Extended Data Figure 6c
+```{r}
+p_flow_e<- cao$plotSampleDistances(space="expression", legend.position=c(0,1), sample.colors = sample_meta$Flowcell, color.title = "Flowcell",)
+
+p_flow_e$data <- p_flow_e$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_flow_e$data$color <- sample_meta$Flowcell
+
+p_flow_c<- cao$plotSampleDistances(space="coda", legend.position=c(0,1), sample.colors = sample_meta$Flowcell, color.title = "Flowcell")
+p_flow_c$data <- p_flow_c$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_flow_c$data$color <- sample_meta$Flowcell
+```
+
+```{r}
+plot_grid(p_flow_e, p_flow_c)+ theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+filename = "figures/MDS_flowcell.pdf"
+pdf.width = 8
+pdf.height = 4
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+### Extended Data Figure 6d
+```{r fig.height=5, fig.width=5}
+p_e <- cao$plotSampleDistances(space="expression", legend.position=c(0,1), sample.colors = sample_meta$`10x Step 1`, color.title = "10x Step 1",title = "Expression")
+p_e$data <- p_e$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_e$data$color <- sample_meta$`10x Step 1`
+
+```
+
+```{r}
+p_c <- cao$plotSampleDistances(space="coda", legend.position=c(0,1), sample.colors = sample_meta$`10x Step 1`, color.title = "10x Step 1",title = "CoDA")
+p_c$data <- p_c$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_c$data$color <- sample_meta$`10x Step 1`
+
+```
+```{r}
+plot_grid(p_e,p_c, ncol = 2) + theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+
+filename = "figures/MDS_10x_1.pdf"
+pdf.width = 8
+pdf.height = 4.3
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+### Extended Data Figure 6e
+```{r}
+p_step2_e <- cao$plotSampleDistances(space="expression", legend.position=c(0,1), sample.colors = sample_meta$`10x Step 2`, color.title = "10x Step 2")
+p_step2_e$data <- p_step2_e$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_step2_e$data$color <- sample_meta$`10x Step 2`
+
+```
+
+```{r}
+p_step2_c<- cao$plotSampleDistances(space="coda", legend.position=c(0,1), sample.colors = sample_meta$`10x Step 2`, color.title = "10x Step 2")
+p_step2_c$data <- p_step2_c$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_step2_c$data$color <- sample_meta$`10x Step 2`
+
+```
+```{r}
+plot_grid(p_step2_e,p_step2_c, ncol = 2) + theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+
+filename = "figures/MDS_10x_2.pdf"
+pdf.width = 8
+pdf.height = 4
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+### Extended Data Figure 6f
+```{r}
+p_step3_e <- cao$plotSampleDistances(space="expression", legend.position=c(0,1), sample.colors = sample_meta$`10x Step 3`, color.title = "10x Step 3")
+p_step3_e$data <- p_step3_e$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_step3_e$data$color <- sample_meta$`10x Step 3`
+
+```
+
+```{r}
+p_step3_c<- cao$plotSampleDistances(space="coda", legend.position=c(0,1), sample.colors = sample_meta$`10x Step 3`, color.title = "10x Step 3")
+p_step3_c$data <- p_step3_c$data[c(3,4,5,6,7,2,8,9,10,11,12,13,14,15,16,17,1),]
+p_step3_c$data$color <- sample_meta$`10x Step 3`
+```
+```{r}
+plot_grid(p_step3_e,p_step3_c, ncol = 2) + theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+
+filename = "figures/MDS_10x_3.pdf"
+pdf.width = 8
+pdf.height = 4
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+### Combined 10x steps for narrower margins
+```{r fig.height=12, fig.width=8}
+plot_grid(p_e, p_c, p_step2_e, p_step2_c, p_step3_e, p_step3_c, nrow=3) + theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+filename = "figures/MDS_10x_steps.pdf"
+pdf.width = 8
+pdf.height = 12.3
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+### Extended Data Figure 6g-h: barplots of covariates 
+```{r}
+meta_new <- sample_meta[ , colSums(is.na(sample_meta))==0]
+smd <- as.data.frame(meta_new) %>% dplyr::select(-Sample,-`Alternative Sample Name`,-PMI)
+
+sep.res_ex <- cao$estimateMetadataSeparation(smd, space="expression", dist="l1", verbose=T)
+meta_p_ex <- (-log10(sep.res_ex$padjust)) %>% {tibble(Type=names(.), value=.)} 
+p_ex <- cacoa:::plotMeanMedValuesPerCellType(df = meta_p_ex,type="bar", yline=-log10(0.05), ylab="-log10(separation p-value)",ns.symbol = T)
+
+sep.res_coda <- cao$estimateMetadataSeparation(smd, space="coda", dist="l1", verbose=T)
+meta_p_coda <- (-log10(sep.res_coda$padjust)) %>% {tibble(Type=names(.), value=.)} 
+p_coda <- cacoa:::plotMeanMedValuesPerCellType(df = meta_p_coda,type="bar", yline=-log10(0.05), ylab="-log10(separation p-value)",ns.symbol = T)
+
+```
+
+```{r}
+plot_grid(p_ex, p_coda, ncol=2, labels=c("Expression", "CoDA"), hjust=0, label_x=0.2, label_y=0.98)+ theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm"))
+filename = "figures/MDS_signif_color.pdf"
+pdf.width = 10
+pdf.height = 5.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+
+```{r}
+sessionInfo()
+```
+

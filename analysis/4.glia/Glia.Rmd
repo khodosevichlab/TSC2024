@@ -1,0 +1,373 @@
+---
+title: "snRNA-seq TSC2: Case-control analysis - Glia"
+output: html_notebook
+author: "Frederik Nørby Friis Sørensen, University of Copenhagen"
+date: "April 2026"
+---
+
+## LIBS 
+```{r include=FALSE}
+library(dplyr)
+library(magrittr)
+library(conos)
+library(pagoda2)
+library(scHelper)
+library(cacoa)
+library(ggplot2)
+library(ggrastr)
+library(cowplot)
+library(HDF5Array)
+library(Seurat)
+set.seed(1)
+```
+
+```{r message=FALSE, include=FALSE}
+# Check if 'data' folder exists, if not, create it
+if (!dir.exists("data")) {
+  dir.create("data")
+  cat("Created 'data' folder\n")
+} else {
+  cat("'data' folder already exists\n")
+}
+
+# Check if 'figure' folder exists, if not, create it
+if (!dir.exists("figures")) {
+  dir.create("figures")
+  cat("Created 'figures' folder\n")
+} else {
+  cat("'figures' folder already exists\n")
+}
+
+```
+
+# Load basic objects
+```{r}
+cms <- readRDS("../../TSC2024_data_files/3.all_cells/cms_final_filter.rds")
+annotation <- readRDS("../../TSC2024_data_files/3.all_cells/annotation_all_2024.rds")
+```
+
+## Subset glia
+```{r}
+cms %<>% lapply(function(x) x[,colnames(x) %in% names(annotation$l1[annotation$l1 %in% c("Astrocytes","diff","Endothelial cells","Immune cells","Microglia","Oligodendrocytes","OPCs","Pericytes")])])
+```
+
+```{r}
+saveRDS(cms, "cms_glia.rds", compress=F)
+```
+
+```{r}
+cms <- readRDS("cms_glia.rds")
+```
+
+```{r eval=FALSE, include=FALSE}
+con_glia<- quickConos(cms,
+                  names(cms), 
+                  make.geneknn = F,
+                  n.odgenes = 3e3,
+                  nPcs = 100,
+                  min.cells.per.gene = 0, 
+                  min.transcripts.per.cell = 0, 
+                  ncomps = 40,
+                  get.tsne = F,
+                  n.cores.p2=100,
+                  n.cores.con=100)
+con_glia <- con_glia$con
+
+saveRDS(object = con_glia, file = "con_glia.rds", compress = F)
+```
+
+```{r}
+con_glia <- readRDS("con_glia.rds")
+```
+
+```{r}
+anno_glia <- annotation$l1[annotation$l1 %in% c("Astrocytes","diff","Endothelial cells","Immune cells","Microglia","Oligodendrocytes","OPCs","Pericytes")] %>% droplevels()
+table(anno_glia)
+```
+```{r}
+saveRDS(anno_glia,"anno_glia.rds", compress=F)
+```
+
+# Cacoa Control vs lesion - Glia
+```{r eval=FALSE, include=FALSE}
+##Cacoa Control vs lesion
+cao <- Cacoa$new(data.object = con_glia, sample.groups = c(rep("Control",6), rep("TSC2",11)) %>% setNames(names(con_glia$samples)), cell.groups = anno_glia, ref.level = "Control", target.level = "TSC2", n.cores = 100)
+
+```
+```{r}
+saveRDS(cao, "cao_glia.rds", compress=F)
+```
+
+```{r}
+#cao <- readRDS("cao_glia.rds")
+```
+
+```{r}
+bs <- if (length(levels(cao$cell.groups)) > 20) 10 else 16
+cao$plot.theme <- theme_bw(base_size = bs) + 
+  theme(plot.title=element_text(hjust = 0.5), 
+        legend.background=element_rect(fill=alpha("white", 0.2)),
+        legend.text=element_text(size=12), 
+        legend.margin=margin(6, 6, 4, 1, 'pt'),
+        plot.margin=margin())
+
+
+cao$cell.groups.palette <- levels(cao$cell.groups) %>% 
+  {setNames(sample(brewerPalette("Paired")(length(.))), .)}
+
+cao$sample.groups.palette <- c("#d73027", "#4575b4") %>% 
+  setNames(c(cao$target.level, cao$ref.level))
+```
+
+```{r}
+# sorted cell type names, with the largest cell types first
+
+example.celltypes <- names(sort(table(cao$cell.groups),decreasing=T))
+top1 <- example.celltypes[c(1,4)]
+top2 <- example.celltypes[c(1,5,6,9,13,17,31,34)]
+ 
+cells.to.contour <- top2
+cell.to.go <- example.celltypes[2]
+
+alpha <- 0.2; size <- 0.1;
+```
+
+## Fig. 2e
+```{r fig.height=8, fig.width=8}
+pdf(file = "figures/Annotation.pdf", height = 8, width = 8)
+
+cao$plotEmbedding(color.by='cell.groups',
+                  alpha=alpha,
+                  size=size,
+                  title='Annotation',
+                  plot.na=FALSE,
+                  show.legend=FALSE,
+                  font.size=c(2.5,3)) %>% rasterise(dpi=600) + 
+  theme(plot.margin=unit(c(0.2,0.2,0.2,0.2),"cm")) +
+  theme_void()
+
+dev.off()
+```
+
+
+#Cluster based compositional and expression
+```{r}
+cao$estimateCellLoadings()
+cao$estimateExpressionShiftMagnitudes(top.n.genes = 500)
+```
+
+## Expression distance
+### Fig. 3b
+```{r}
+p3 <- cao$plotExpressionShiftMagnitudes(type = "box")
+
+ 
+ iqr = function(z, lower = 0.25, upper = 0.75) {
+  data.frame(
+    y = median(z),
+    ymin = quantile(z, lower),
+    ymax = quantile(z, upper)
+  )
+}
+
+
+p_ed <- p3$data %>% ggplot( aes( y = value, x = Type, color = Type)) +
+  geom_violin(scale = "width", 
+                #fill = "#ededed", 
+                color = NA, aes(fill = Type), alpha = 0.2, 
+              trim = F) +
+  theme_light() + theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), panel.grid.minor = element_blank(), panel.grid.major = element_blank()) + scale_color_manual(values = cao$cell.groups.palette)+ scale_fill_manual(values = cao$cell.groups.palette) +
+  geom_hline(yintercept = 0, linewidth = 0.1) +
+  stat_summary(fun.data = iqr, geom = "errorbar", show.legend = F, aes(color = Type), shape = 23, stroke = 0.5, alpha = 0.9,color = "grey30", width = 0.25) + 
+  stat_summary(fun.data = iqr, geom = "point", show.legend = F,aes(fill = Type), shape = 23, stroke = 0.5, color = "grey30", alpha = 0.9)  + ylab(("Normalized expression distance")) + xlab("")+ylim(-0.2,0.75)
+```
+
+```{r fig.height=5, fig.width=2}
+pdf(file = "figures/expression_distance_new.pdf", height = 3.5, width = 2)
+p_ed
+dev.off()
+```
+
+## Cell loadings
+### Fig. 2c
+```{r}
+p2 <- cao$plotCellLoadings(show.pvals = F)
+p2 <- p2$data
+```
+
+```{r}
+library(data.table)
+library(ggnewscale)
+p2 <- data.table(p2)
+
+palcomp <- setNames(ifelse(p2[, ((values)), by = ind][order(-V1),V1] > 0, "deeppink3", "dodgerblue2"), p2[, ((values)), by = ind][order(-V1),ind])
+palcomp2 <- setNames(ifelse(p2[, ((values)), by = ind][order(-V1),V1] > 0, "darkblue", "grey50"), p2[, ((values)), by = ind][order(-V1),ind])
+
+
+p_cl <- p2 %>% ggplot( aes( x = values, y = ind, color = ind)) +
+  geom_violin(scale = "width", 
+                #fill = "#ededed", 
+                color = NA, aes(fill = ind), alpha = 0.2) +
+  theme_light() + theme(legend.position = "none") + scale_fill_manual(values = palcomp) +
+  geom_vline(xintercept = 0, linewidth = 0.2) +
+  new_scale_fill() + 
+  stat_summary(fun.data = iqr, geom = "errorbar", show.legend = F, aes(color = ind), stroke = 0.6, alpha = 0.9,color = "grey30", width = 0.25) + 
+  stat_summary(fun.data = iqr, geom = "point", show.legend = F,aes(fill = ind), shape = 23, stroke = 1, color = "grey30", alpha = 0.9, size = 2) +  scale_fill_manual(values = palcomp) + xlab("Separation coefficient") + 
+  ylab("") +
+  xlim(-1.0,1.0)
+  
+
+```
+```{r}
+pdf(file = "figures/Cell_loadings_new.pdf", height = 3, width = 7)
+p_cl
+dev.off()
+```
+
+
+# Cluster-free
+## Estimate cell density, compositional changes
+```{r}
+cao$estimateCellDensity(method='graph')
+cao$estimateDiffCellDensity(type='wilcox')
+```
+###  Fig. 2e
+```{r}
+p1 <- cao$plotEmbedding(color.by='cell.groups', alpha=0.6, size=0.1, 
+                    plot.na=FALSE, show.legend=FALSE, font.size=4) %>% rasterise(dpi=900)+ theme(panel.grid.major = element_blank(), 
+               panel.grid.minor = element_blank(), panel.border = element_blank())
+p2 <- cao$plotDiffCellDensity(legend.position=c(0, 1)) %>% rasterize(dpi=900)+ theme(panel.grid.major = element_blank(), 
+               panel.grid.minor = element_blank(), panel.border = element_blank())
+
+```
+
+```{r fig.height=8, fig.width=16, warning=FALSE}
+pdf(file = "figures/differential_cell_density.pdf", height = 8, width = 16)
+p1 + p2 + theme(plot.margin=unit(c(0.4,0.4,0.4,0.4),"cm"))
+dev.off()
+```
+## Expression changes, cluster-free
+### Fig. 3c
+```{r}
+cao$estimateClusterFreeExpressionShifts(
+  gene.selection="expression", min.n.between=3, min.n.within=3
+)
+```
+
+```{r fig.height=6, fig.width=6}
+p3 <- cao$plotClusterFreeExpressionShifts(cell.groups = anno_glia,
+                                          legend.position=c(0, 1),
+                                          plot.na =F,
+                                          font.size=4,
+                                          size=0.2,
+                                          alpha=0.6,
+                                          build.panel = F,)[[2]] %>% rasterize(dpi=900) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+
+pdf(file = "figures/Cluster_free_expression.pdf", height = 10, width = 10)
+p3 %>% rasterize(dpi=600) + theme(plot.margin=unit(c(0.4,0.4,0.4,0.4),"cm"))
+dev.off()
+
+```
+
+```{r}
+saveRDS(cao, "cao_glia.rds", compress=F)
+```
+
+```{r}
+cao <- readRDS("cao_glia.rds")
+```
+
+#DE and GO
+```{r}
+cao <- Cacoa$new(cao)
+```
+
+```{r}
+cao$estimateDEPerCellType(
+  independent.filtering=F, test='DESeq2.Wald', verbose=T ,n.cores = 200,seed.resampling = 42)
+```
+###Make DE table for all glia
+
+```{r}
+library(data.table)
+de_glia <- rbindlist(lapply(cao$test.results$de, function(x) x$res), idcol = "CellType")
+de_glia
+write.csv2(de_glia,file = "differential_expression_glia.csv")
+```
+
+```{r}
+library(org.Hs.eg.db)
+org <- org.Hs.eg.db
+cao$estimateOntology(type="GSEA",org.db = org, n.top.genes = 500,name="GSEA")
+cao$estimateOntology(type="GO", org.db = org, n.top.genes = 500, n.cores=100, name="GO")
+```
+```{r}
+saveRDS(cao,"cao_glia.rds", compress=F)
+```
+
+```{r fig.height=6.5, fig.width=8.5}
+cao_g$plotOntologyHeatmap(name="GSEA", genes="up",top.n = 30, legend.title="-log10(p-value)", min.genes=5,p.adj = 0.05,max.log.p = 5)+ theme(plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"))
+filename = "figures/GSEA_UP_HM.pdf"
+pdf.width = 8.5
+pdf.height = 4.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r}
+cao_g$plotOntologyHeatmap(name="GSEA", genes="down",top.n = 30, legend.title="-log10(p-value)", min.genes=5,p.adj = 0.05,max.log.p = 5)+ theme(plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"))
+filename = "figures/GSEA_DOWN_HM.pdf"
+pdf.width = 8.5
+pdf.height = 4.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+## GSEA all
+### Extended data fig. 16a
+```{r fig.height=6, fig.width=5.5}
+cao_g$plotOntologyHeatmapCollapsed(name="GSEA", genes="all", n=30,min.genes = 20, clust.method="ward.D",p.adj = 0.05,description.regex = "")+ theme(plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"))
+filename = "figures/GSEA_UP_HM_collapsed.pdf"
+pdf.width = 5.5
+pdf.height = 6
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+### Extended data fig. 16b
+```{r fig.height=6.5, fig.width=8.5}
+cao_g$plotOntologyHeatmap(name="GSEA", genes="up",top.n = 30, legend.title="-log10(p-value)", min.genes=5,p.adj = 0.05,max.log.p = 5)+ theme(plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"))
+filename = "figures/GSEA_UP_HM.pdf"
+pdf.width = 8.5
+pdf.height = 4.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+```{r}
+cao_g$plotOntologyHeatmap(name="GSEA", genes="down",top.n = 30, legend.title="-log10(p-value)", min.genes=5,p.adj = 0.05,max.log.p = 5)+ theme(plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"))
+filename = "figures/GSEA_DOWN_HM.pdf"
+pdf.width = 8.5
+pdf.height = 4.5
+dev.copy2pdf(file=filename, width = pdf.width, height = pdf.height)
+```
+
+```{r}
+library(data.table)
+rbindlist(lapply(cao$test.results$GSEA$res, function(x) x$BP@result), idcol = "CellType")
+rbindlist(lapply(cao$test.results$GSEA$res, function(x) x$CC@result), idcol = "CellType") 
+rbindlist(lapply(cao$test.results$GSEA$res, function(x) x$MF@result), idcol = "CellType")
+```
+```{r}
+ontologies<- rbindlist(list(rbindlist(lapply(cao$test.results$GSEA$res, function(x) x$BP@result), idcol = "CellType"),
+                rbindlist(lapply(cao$test.results$GSEA$res, function(x) x$CC@result), idcol = "CellType"), 
+                rbindlist(lapply(cao$test.results$GSEA$res, function(x) x$MF@result), idcol = "CellType")), idcol = "TypeOfOntology")
+```
+
+```{r}
+inflammation_immune <- ontologies %>% filter(CellType== "Microglia")%>% filter(grepl('infla|immune', Description))
+inflammation_immune
+write.csv2(inflammation_immune, "inflammation_immune_microglia.csv")
+```
+
+```{r}
+sessionInfo()
+```
+
