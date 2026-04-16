@@ -27,7 +27,7 @@ Before starting these make sure to complete the previous workflows 3.all_cells, 
 ## Count matrices and other data files
 Data files have been encrypted in one file `TSC2024_data.tgz` and can be downloaded here or with wget in terminal:
 
-"https://kkh.bric.ku.dk/Frederik/TSC2/TSC2024_data.tgz" 
+"https://kkh.bric.ku.dk/Frederik/TSC2/TSC2024_data_files.tgz" 
 
 The data file folder contains folders analogous to the format as above. Each folder contains the necessary data files for the corresponding folder in the github repository.
 
